@@ -25,6 +25,13 @@ export default tseslint.config(
     },
   },
   {
+    // 测试里的假实现常常是「同步返回包一层 Promise」，没有 await 是正常的
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+  {
     // 配置文件本身不在 tsconfig 范围内，关掉类型检查规则
     files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
