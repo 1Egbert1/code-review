@@ -8,4 +8,5 @@ export type * from './diff.js';
 export type * from './finding.js';
 export type * from './result.js';
 export type * from './inspection.js';
+export type * from './context.js';
 export type * from './config.js';
