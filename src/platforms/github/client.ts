@@ -64,6 +64,62 @@ export interface GitHubGateway {
 
   /** 读取仓库元信息 */
   getRepoInfo(ref: RepoRef): Promise<RepoInfo>;
+
+  /**
+   * 取合并请求当前的头部提交号。
+   *
+   * 创建行内评论与取文件内容都要用它，且必须**当场取**——用上一轮缓存的值
+   * 在新提交推上来之后会把评论贴到错误的提交上。
+   */
+  getPullRequestHeadSha(ref: PullRequestRef): Promise<string>;
+}
+
+/**
+ * 写操作单独一个接口。
+ *
+ * 与读分开的理由很实际：测试里的假网关只实现读，不该被迫写六个空方法；
+ * 而发送层只依赖写接口，能一眼看出「这个模块有副作用」。
+ */
+export interface GitHubWriteGateway {
+  /** 在改动行上新建评审评论 */
+  createReviewComment(
+    ref: PullRequestRef,
+    input: {
+      readonly body: string;
+      readonly commitId: string;
+      readonly path: string;
+      readonly line: number;
+      readonly side: 'LEFT' | 'RIGHT';
+    },
+  ): Promise<RawReviewComment>;
+
+  updateReviewComment(ref: PullRequestRef, commentId: string, body: string): Promise<void>;
+
+  deleteReviewComment(ref: PullRequestRef, commentId: string): Promise<void>;
+
+  getReviewComment(ref: PullRequestRef, commentId: string): Promise<RawReviewComment | null>;
+
+  /** 合并请求下的普通评论（摘要用它：它不属于任何一行） */
+  listIssueComments(ref: PullRequestRef): Promise<readonly RawIssueComment[]>;
+
+  createIssueComment(ref: PullRequestRef, body: string): Promise<RawIssueComment>;
+
+  updateIssueComment(ref: RepoRef, commentId: string, body: string): Promise<void>;
+
+  /**
+   * 标记会话已解决。GitHub 只有 GraphQL 接口，因此实现要「取评论 → 查会话 → 解决」三步。
+   * 网关不具备该能力时**省略这个方法**，发送层会据此降级为编辑评论。
+   */
+  resolveThread?(ref: PullRequestRef, commentId: string): Promise<void>;
+}
+
+/** 读写齐全的网关。真实实现同时满足两个接口。 */
+export type GitHubFullGateway = GitHubGateway & GitHubWriteGateway;
+
+/** 普通评论（非行内）。摘要评论就是它。 */
+export interface RawIssueComment {
+  readonly id: string;
+  readonly body: string;
 }
 
 /**
@@ -71,7 +127,7 @@ export interface GitHubGateway {
  *
  * 注意：这里不做令牌校验——校验由凭证模块负责，本函数只负责组装。
  */
-export function createGitHubGateway(token: string): GitHubGateway {
+export function createGitHubGateway(token: string): GitHubFullGateway {
   const octokit = new Octokit({ auth: token });
 
   return {
@@ -140,6 +196,138 @@ export function createGitHubGateway(token: string): GitHubGateway {
         hasWiki: response.data.has_wiki === true,
         defaultBranch: response.data.default_branch,
       };
+    },
+
+    async getPullRequestHeadSha(ref) {
+      const response = await octokit.rest.pulls.get({
+        owner: ref.owner,
+        repo: ref.repo,
+        pull_number: ref.number,
+      });
+      return response.data.head.sha;
+    },
+
+    async createReviewComment(ref, input) {
+      const response = await octokit.rest.pulls.createReviewComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        pull_number: ref.number,
+        body: input.body,
+        commit_id: input.commitId,
+        path: input.path,
+        line: input.line,
+        side: input.side,
+      });
+
+      return {
+        id: String(response.data.id),
+        body: response.data.body,
+        path: response.data.path,
+        line: response.data.line ?? null,
+        side:
+          response.data.side === 'LEFT' || response.data.side === 'RIGHT'
+            ? response.data.side
+            : null,
+      };
+    },
+
+    async updateReviewComment(ref, commentId, body) {
+      await octokit.rest.pulls.updateReviewComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: Number(commentId),
+        body,
+      });
+    },
+
+    async deleteReviewComment(ref, commentId) {
+      await octokit.rest.pulls.deleteReviewComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: Number(commentId),
+      });
+    },
+
+    async getReviewComment(ref, commentId) {
+      try {
+        const response = await octokit.rest.pulls.getReviewComment({
+          owner: ref.owner,
+          repo: ref.repo,
+          comment_id: Number(commentId),
+        });
+        return {
+          id: String(response.data.id),
+          body: response.data.body,
+          path: response.data.path,
+          line: response.data.line ?? null,
+          side:
+            response.data.side === 'LEFT' || response.data.side === 'RIGHT'
+              ? response.data.side
+              : null,
+        };
+      } catch {
+        return null;
+      }
+    },
+
+    async listIssueComments(ref) {
+      const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.number,
+        per_page: 100,
+      });
+
+      return comments.map((comment) => ({ id: String(comment.id), body: comment.body ?? '' }));
+    },
+
+    async createIssueComment(ref, body) {
+      const response = await octokit.rest.issues.createComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.number,
+        body,
+      });
+      return { id: String(response.data.id), body: response.data.body ?? body };
+    },
+
+    async updateIssueComment(ref, commentId, body) {
+      await octokit.rest.issues.updateComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: Number(commentId),
+        body,
+      });
+    },
+
+    async resolveThread(ref, commentId) {
+      const comment = await octokit.rest.pulls.getReviewComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: Number(commentId),
+      });
+
+      // 会话 id 只能从 GraphQL 拿，REST 只给评论的 node_id
+      const query = `query($id: ID!) {
+        node(id: $id) {
+          ... on PullRequestReviewComment {
+            pullRequestReviewThread { id }
+          }
+        }
+      }`;
+      const found = await octokit.graphql<{
+        node: { pullRequestReviewThread?: { id: string } } | null;
+      }>(query, {
+        id: comment.data.node_id,
+      });
+
+      const threadId = found.node?.pullRequestReviewThread?.id;
+      if (threadId === undefined) throw new Error('找不到该评论所属的会话');
+
+      const mutation = `mutation($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+      }`;
+      await octokit.graphql(mutation, { threadId });
     },
   };
 }

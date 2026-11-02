@@ -7,4 +7,6 @@
  */
 import { main } from './main.js';
 
-process.exitCode = main(process.argv.slice(2));
+void main(process.argv.slice(2)).then((code) => {
+  process.exitCode = code;
+});
