@@ -20,3 +20,44 @@ export interface PositionPort<Position> {
    */
   toCommentPosition(anchor: LineAnchor): Position | null;
 }
+
+/** 行内评论的落点。平台之间字段不同，这里只保留最小共通集。 */
+export interface WriteTarget {
+  readonly path: string;
+  readonly line: number;
+  readonly side: 'new' | 'old';
+}
+
+/** 写操作失败的原因分类。区分它们是为了决定「降级」还是「重试」。 */
+export interface WriteFailure {
+  readonly kind: 'permission' | 'rate-limit' | 'not-found' | 'other';
+  readonly message: string;
+  readonly status: number | null;
+}
+
+export type WriteResult =
+  | { readonly ok: true; readonly commentId: string }
+  | { readonly ok: false; readonly failure: WriteFailure };
+
+/**
+ * 评论写入端口。
+ *
+ * 只有这一层有外部副作用，所以它必须是**唯一**能发请求的地方，
+ * 且每个方法都要能返回结构化失败——上层据此决定降级、重试还是记告警。
+ */
+export interface CommentPort {
+  readonly kind: string;
+  createInline(target: WriteTarget, body: string): Promise<WriteResult>;
+  /** 新建一条独立讨论（摘要用） */
+  createThread(body: string): Promise<WriteResult>;
+  update(commentId: string, body: string): Promise<WriteResult>;
+  /** 标记会话已解决；权限不足时由上层降级为编辑 */
+  resolve(commentId: string): Promise<WriteResult>;
+  remove(commentId: string): Promise<WriteResult>;
+  /** 回读评论正文，用于校验平台没有静默改写内容 */
+  read(commentId: string): Promise<{ readonly body: string } | null>;
+  /** 找到已有的摘要评论（按标记识别），用于「有则更新」 */
+  findThread(
+    markerText: string,
+  ): Promise<{ readonly commentId: string; readonly body: string } | null>;
+}

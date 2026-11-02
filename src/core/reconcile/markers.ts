@@ -92,3 +92,16 @@ export function parseMarker(body: string): CommentMarker | null {
 export function stripMarker(body: string): string {
   return body.replace(MARKER_PATTERN, '').trimEnd();
 }
+
+/**
+ * 摘要评论的固定标记。
+ *
+ * 与行内评论的标记分开，因为它没有指纹也没有位置——它只是一个「这条是本工具的摘要」的信号。
+ * 靠它实现「有则编辑、无则新建」，否则每轮都会多一条摘要，PR 很快被刷屏。
+ */
+export const SUMMARY_MARKER = '<!-- acr:v1|kind=summary -->';
+
+/** 判断一段正文是不是本工具的摘要评论。 */
+export function isSummaryBody(body: string): boolean {
+  return body.includes(SUMMARY_MARKER);
+}
