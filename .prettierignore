@@ -1,0 +1,10 @@
+# 规格书是人工排版的文档，格式化会重排表格、破坏原有排版意图
+01-*.md
+
+# 自动生成，不需要格式化
+pnpm-lock.yaml
+
+# 产物与依赖
+dist/
+node_modules/
+coverage/
