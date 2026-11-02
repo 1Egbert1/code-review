@@ -154,7 +154,7 @@ async function runReviewCommand(
     return 3;
   }
 
-  const prText = flags['pr'];
+  const prText = flags['pr'] ?? deps.env['ACR_PULL_REQUEST'];
   const prNumber = prText === undefined || prText === '' ? Number.NaN : Number(prText);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     deps.stderr('缺少合并请求编号：请用 --pr <编号> 指定\n');

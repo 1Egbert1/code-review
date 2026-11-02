@@ -1,0 +1,45 @@
+# AI 代码审查 Action。
+#
+# 安全要点（务必保留）：本 Action **绝不检出待审代码**。
+# 它只通过 API 取改动文本，因此即使配置 pull_request_target 也不构成远程代码执行风险——
+# 一旦改成"先 checkout 再跑"，pull_request_target 就会把 PR 里的脚本执行到有写权限的上下文里。
+name: AI Code Review
+description: 固定编排的三维代码审查，把问题贴到改动对应的那一行
+author: 1Egbert1
+
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  api-key:
+    description: 模型服务的密钥（BYOK）。请放在仓库 secret 里，不要写进配置文件
+    required: true
+  github-token:
+    description: GitHub 令牌。默认用内置令牌，无需自建
+    required: false
+    default: ${{ github.token }}
+  mode:
+    description: review 真发评论；dry-run 只打印
+    required: false
+    default: review
+
+outputs:
+  result:
+    description: 审查是否完成（completed / failed）
+    value: ${{ steps.run.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        # 零配置：仓库与编号都从事件上下文里来，接入方不需要额外配置
+        ACR_REPOSITORY: ${{ github.repository }}
+        ACR_PULL_REQUEST: ${{ github.event.pull_request.number }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AI_REVIEW_API_KEY: ${{ inputs.api-key }}
+      run: |
+        node "${{ github.action_path }}/dist/cli.js" "${{ inputs.mode }}"
+        echo "result=completed" >> "$GITHUB_OUTPUT"

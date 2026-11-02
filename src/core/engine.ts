@@ -38,7 +38,8 @@ import { correctnessReviewer } from './reviewers/dimensions/correctness/index.js
 import { securityReviewer } from './reviewers/dimensions/security/index.js';
 import { conventionReviewer } from './reviewers/dimensions/convention/index.js';
 import { runReviewer, sumUsage } from './reviewers/run.js';
-import type { ReviewerSpec } from './reviewers/schema.js';
+import type { ReviewerRunResult } from './reviewers/run.js';
+import type { ReviewerInput, ReviewerSpec } from './reviewers/schema.js';
 import { verifyFindings } from './verify/chain.js';
 import type { CommentPort } from '../platforms/types.js';
 import type { LlmClient } from '../providers/types.js';
@@ -136,7 +137,21 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   );
   const paths = reviewable.map((file) => file.path);
 
-  const bundle = buildBundle(snapshot, deps.config, paths);
+  // 跨文件索引是锦上添花：建不出来就退回单文件上下文，不能让整轮挂掉
+  let bundle: ContextBundle;
+  try {
+    bundle = buildBundle(snapshot, deps.config, paths);
+  } catch (error) {
+    bundle = assembleContext(snapshot, {
+      contextWindow: deps.config.llm.contextWindow,
+      maxOutputTokens: deps.config.llm.maxOutputTokens,
+    });
+    warnings.push({
+      kind: 'other',
+      message: `跨文件展开失败，已退回单文件上下文：${asMessage(error)}`,
+      target: null,
+    });
+  }
 
   // ── 审 ────────────────────────────────────────────────────────────────
   const collected: { raw: RawFinding; reviewer: ReviewerId }[] = [];
@@ -145,6 +160,8 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   let completed = 0;
   let failed = 0;
   let truncatedCount = 0;
+  /** 费用触顶后停止后续调用，但已得结果照常渲染 */
+  let budgetExhausted = false;
 
   const dimensions = deps.config.review.dimensions;
   const model = deps.config.llm.model;
@@ -152,19 +169,11 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
 
-    if (dimensions.correctness.enabled) {
+    if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
-        const result = await runReviewer({
-          client: deps.client,
-          spec: SPECS.correctness,
-          input: { file: file.path, segments },
-          model,
-          temperature: deps.config.llm.temperature,
-          maxOutputTokens: deps.config.llm.maxOutputTokens,
-          shrink: (input) => {
-            const shrunk = shrinkToChangedOnly(input);
-            return shrunk === null ? null : { ...input, segments: shrunk };
-          },
+        const result = await runWithRetry(deps, SPECS.correctness, { file: file.path, segments }, (input) => {
+          const shrunk = shrinkToChangedOnly(input);
+          return shrunk === null ? null : { ...input, segments: shrunk };
         });
 
         totals.calls += result.calls;
@@ -172,6 +181,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
         rejections.push(...result.rejections);
         if (result.truncated) truncatedCount += 1;
         for (const raw of result.findings) collected.push({ raw, reviewer: 'correctness' });
+        budgetExhausted = isOverBudget(totals.usage, deps.config);
       } catch (error) {
         failed += 1;
         warnings.push({
@@ -188,19 +198,12 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
         content: snapshot.fileContents.get(file.path) ?? null,
       });
 
-      if (decision.send) {
+      if (decision.send && !budgetExhausted) {
         try {
-          const result = await runReviewer({
-            client: deps.client,
-            spec: SPECS.security,
-            input: {
-              file: file.path,
-              segments,
-              note: `安全审查原因：${decision.reasons.join('、')}`,
-            },
-            model,
-            temperature: deps.config.llm.temperature,
-            maxOutputTokens: deps.config.llm.maxOutputTokens,
+          const result = await runWithRetry(deps, SPECS.security, {
+            file: file.path,
+            segments,
+            note: `安全审查原因：${decision.reasons.join('、')}`,
           });
 
           totals.calls += result.calls;
@@ -208,6 +211,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
           rejections.push(...result.rejections);
           if (result.truncated) truncatedCount += 1;
           for (const raw of result.findings) collected.push({ raw, reviewer: 'security' });
+          budgetExhausted = isOverBudget(totals.usage, deps.config);
         } catch (error) {
           failed += 1;
           warnings.push({
@@ -268,9 +272,18 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   for (const [path, content] of snapshot.fileContents) {
     if (content !== null) contents.set(path, content);
   }
-  const symbolIndex = buildSymbolIndex(contents);
-  const ruleOutcome = checkSignatureChanges(findSignatureChanges(diff), symbolIndex);
-  for (const raw of ruleOutcome.findings) collected.push({ raw, reviewer: 'correctness' });
+  try {
+    const symbolIndex = buildSymbolIndex(contents);
+    const ruleOutcome = checkSignatureChanges(findSignatureChanges(diff), symbolIndex);
+    for (const raw of ruleOutcome.findings) collected.push({ raw, reviewer: 'correctness' });
+  } catch (error) {
+    // 这条规则是「免费得到的」，坏了不该影响主链路
+    warnings.push({
+      kind: 'other',
+      message: `签名变化检查未执行：${asMessage(error)}`,
+      target: null,
+    });
+  }
 
   // ── 校 ────────────────────────────────────────────────────────────────
   const verified = verifyFindings(collected, {
@@ -285,6 +298,14 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
     maxInline: deps.config.review.maxInlineComments,
   });
   const allRejections = [...rejections, ...verified.rejections];
+
+  if (budgetExhausted) {
+    warnings.push({
+      kind: 'budget',
+      message: `本轮因费用上限（$${String(deps.config.review.maxBudgetUsd)}）提前中止，结果不完整`,
+      target: null,
+    });
+  }
 
   if (truncatedCount > 0) {
     warnings.push({
@@ -366,7 +387,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
       calls: totals.calls,
       tokens: totals.usage,
       estimatedCostUsd: estimateCost(totals.usage, deps.config),
-      truncatedByBudget: false,
+      truncatedByBudget: budgetExhausted,
     },
     warnings,
     startedAt,
@@ -389,6 +410,50 @@ function estimateCost(usage: TokenUsage, config: ResolvedConfig): number | null 
     usage.cacheRead * input * pricing.cacheReadMultiplier +
     usage.output * output
   );
+}
+
+/**
+ * 结构性失败的兜底重试。
+ *
+ * 只对「输出无法解析 / 缺少 findings 数组」重试一次——这类失败常常是模型偶发的格式抖动，
+ * 再问一次往往就好了。**截断不在此列**，它已经在审核员内部按「缩材料重试一次」处理过，
+ * 再重试同一份材料必然是同样的结果。
+ */
+async function runWithRetry(
+  deps: EngineDeps,
+  spec: ReviewerSpec,
+  input: ReviewerInput,
+  shrink?: (input: ReviewerInput) => ReviewerInput | null,
+): Promise<ReviewerRunResult> {
+  const call = (): Promise<ReviewerRunResult> =>
+    runReviewer({
+      client: deps.client,
+      spec,
+      input,
+      model: deps.config.llm.model,
+      temperature: deps.config.llm.temperature,
+      maxOutputTokens: deps.config.llm.maxOutputTokens,
+      shrink,
+    });
+
+  const first = await call();
+  const structural = first.rejections.some(
+    (rejection) => rejection.title === '(输出无法解析)' || rejection.title === '(整批)',
+  );
+  if (!structural || first.findings.length > 0) return first;
+
+  const second = await call();
+  return {
+    ...second,
+    calls: first.calls + second.calls,
+    usage: sumUsage(first.usage, second.usage),
+  };
+}
+
+/** 累计费用是否已超上限。未配单价时无法判定，一律视为未超。 */
+function isOverBudget(usage: TokenUsage, config: ResolvedConfig): boolean {
+  const cost = estimateCost(usage, config);
+  return cost !== null && cost > config.review.maxBudgetUsd;
 }
 
 function asMessage(error: unknown): string {

@@ -32,8 +32,16 @@ export default tseslint.config(
     },
   },
   {
-    // 配置文件本身不在 tsconfig 范围内，关掉类型检查规则
-    files: ['**/*.js'],
+    // 配置文件与构建脚本不在 tsconfig 范围内，关掉类型检查规则；
+    // 它们是 Node 脚本，需要显式声明全局变量，否则 no-undef 会误报
+    files: ['**/*.js', '**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+      },
+    },
   },
 );

@@ -1,7 +1,11 @@
-# 依赖与产物
+# 依赖与临时产物
 node_modules/
-dist/
 coverage/
+
+dist/.verify.js
+
+# dist/ 必须入库：Action 被引用时 GitHub 不会替它装依赖、也不会替它构建，
+# 远端直接执行仓库里的这个文件（见规格书 2.1.1）
 
 # 本地配置与密钥（规格书 10.2：本地覆盖文件不进版本库）
 .ai-review.local.yml

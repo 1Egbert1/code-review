@@ -18,7 +18,8 @@
     "test": "vitest run",
     "build": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --target=node20 --banner:js=\"import{createRequire as __cr}from 'node:module';const require=__cr(import.meta.url);\" --outfile=dist/cli.js",
     "smoke": "pnpm run build && node dist/cli.js --version",
-    "ci": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run smoke"
+    "verify:dist": "node scripts/verify-dist.mjs",
+    "ci": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run smoke && pnpm run verify:dist"
   },
   "dependencies": {
     "octokit": "^5.0.5",

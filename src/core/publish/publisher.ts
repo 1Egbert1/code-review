@@ -77,6 +77,25 @@ function createThrottle(
   };
 }
 
+
+/**
+ * 限流重试。
+ *
+ * 只对 `rate-limit` 重试：其余失败重试也没用（权限、找不到），重试只会把一次明确的错误
+ * 拖成三次等待。退避 500ms → 1s → 2s，最多三次，仍失败就记进结果，不中断整轮。
+ */
+async function withRetry(
+  attempt: () => Promise<WriteResult>,
+  sleep: (ms: number) => Promise<void>,
+): Promise<WriteResult> {
+  let last = await attempt();
+  for (let round = 1; round <= 3 && !last.ok && last.failure.kind === 'rate-limit'; round += 1) {
+    await sleep(Math.min(500 * 2 ** (round - 1), 4000));
+    last = await attempt();
+  }
+  return last;
+}
+
 /** 回读校验：正文里必须还能找到这条评论的指纹标记。 */
 async function verify(port: CommentPort, commentId: string, fingerprint: string): Promise<boolean> {
   const read = await port.read(commentId);
@@ -113,14 +132,14 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
       if (action.target !== 'inline') continue;
 
       await throttle();
-      const result = await port.createInline(
+      const result = await withRetry(() => port.createInline(
         {
           path: action.finding.anchor.file,
           line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
           side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
         },
         action.body,
-      );
+      ), sleep);
 
       if (!record('create', result)) continue;
       created += 1;
@@ -142,23 +161,23 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
     if (action.kind === 'replace') {
       // 先发新的再处理旧的：顺序反了的话，新评论发失败就彻底丢了这条意见
       await throttle();
-      const createdResult = await port.createInline(
+      const createdResult = await withRetry(() => port.createInline(
         {
           path: action.finding.anchor.file,
           line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
           side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
         },
         action.body,
-      );
+      ), sleep);
 
       if (!record('replace', createdResult)) continue;
       replaced += 1;
 
       await throttle();
-      const removed = await port.remove(action.commentId);
+      const removed = await withRetry(() => port.remove(action.commentId), sleep);
       if (!removed.ok) {
         // 删不掉就退一步标记为已解决，至少不会让旧结论看起来仍然成立
-        const fallback = await port.resolve(action.commentId);
+        const fallback = await withRetry(() => port.resolve(action.commentId), sleep);
         if (!fallback.ok) {
           warnings.push({
             kind: 'permission',
@@ -215,10 +234,10 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
     await throttle();
 
     if (existing === null) {
-      const result = await port.createThread(options.summaryBody);
+      const result = await withRetry(() => port.createThread(options.summaryBody ?? ''), sleep);
       summary = record('summary-create', result) ? 'created' : 'failed';
     } else {
-      const result = await port.update(existing.commentId, options.summaryBody);
+      const result = await withRetry(() => port.update(existing.commentId, options.summaryBody ?? ''), sleep);
       summary = record('summary-update', result) ? 'updated' : 'failed';
     }
   }
