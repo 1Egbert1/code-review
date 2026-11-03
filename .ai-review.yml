@@ -1,0 +1,46 @@
+# 本仓库自用配置，同时作为示例。
+#
+# 只写「和默认值不同」的项：默认值见 src/config/defaults.ts，重复抄一遍
+# 只会在改默认值时不同步，反而更乱。
+
+platform:
+  kind: github
+  tokenEnv: GITHUB_TOKEN
+
+llm:
+  preset: deepseek
+  baseUrl: https://api.deepseek.com/v1
+  model: deepseek-chat
+  apiKeyEnv: AI_REVIEW_API_KEY
+  contextWindow: 65536
+  maxOutputTokens: 4096
+  # 单价不在这里写死：价格会变，写死就是错的。要算钱时再填 llm.pricing
+  structuredOutput: auto
+
+review:
+  # 构建产物与样本不进审查：审它们既没意义，还会把 token 烧在压缩代码上
+  skipPaths:
+    - '**/*.lock'
+    - 'dist/**'
+    - 'fixtures/**'
+    - 'evals/**'
+  maxInlineComments: 10
+  dimensions:
+    correctness:
+      enabled: true
+      severityFloor: minor
+    security:
+      enabled: true
+      severityFloor: minor
+    convention:
+      enabled: true
+      severityFloor: minor
+
+# 门禁默认关闭：先在真实仓库上跑几轮，确认误报率可接受再打开
+gate:
+  enabled: false
+
+inspection:
+  enabled: true
+  # 报告写成常设 Issue；仓库开了 Wiki 时自动优先用 Wiki
+  carrier: auto
