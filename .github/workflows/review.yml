@@ -1,0 +1,61 @@
+# AI 代码审查。接入方把这个文件复制到自己仓库的 .github/workflows/ 下即可。
+#
+# ⚠️ 两个必须理解的取舍：
+#
+# 1. 用 pull_request_target 而不是 pull_request。
+#    因为来自 fork 的 PR 在 pull_request 事件下**拿不到 secrets**（GitHub 不给 fork 的代码
+#    提供仓库密钥），审查会因缺 key 直接失败。开源项目想审外部贡献者的 PR，只能用
+#    pull_request_target。
+#
+# 2. 用 pull_request_target 之所以安全，唯一原因是**本 Action 绝不检出待审代码**。
+#    它只通过 API 读改动文本，从不执行 PR 里的任何东西。一旦某个 step 加了
+#    actions/checkout 指向 PR head，这行就会变成远程代码执行漏洞——因为此时
+#    GITHUB_TOKEN 是有写权限的，secrets 也在环境里。
+#    **不要在这个 job 里 checkout PR 的代码。**
+#
+# 3. 权限必须显式声明。新仓库的 GITHUB_TOKEN 默认是只读的，不声明 pull-requests: write
+#    就会在发评论时拿到 403，而这个错误在日志里长得像权限不足而不是配置问题。
+
+name: AI 代码审查
+
+on:
+  pull_request_target:
+    # ready_for_review：草稿转正式时也审一次，否则草稿期推送的改动会被漏掉
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR 编号
+        required: true
+      mode:
+        description: 先跑 dry-run（只打印不写），确认结论可接受再切到 review
+        type: choice
+        options:
+          - dry-run
+          - review
+        default: dry-run
+
+permissions:
+  contents: read # 读文件内容，构建上下文要用
+  pull-requests: write # 发与改行内评论
+  issues: write # 摘要评论属于 issue comment
+  checks: write # 门禁要写检查运行；未开门禁时用不到，但留着免得开启时才发现缺权限
+
+# 连续推送会触发多次。不串行化的话两次审查会同时操作同一批评论，
+# 出现「删了又建」「同一问题贴两遍」这类看起来像程序错乱的竞态。
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # 草稿 PR 不审：还没写完，报出来的问题大多会被改掉，纯属消耗
+    if: ${{ github.event.pull_request.draft != true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: 1Egbert1/code-review@main
+        with:
+          api-key: ${{ secrets.AI_REVIEW_API_KEY }}
+          mode: ${{ inputs.mode || 'review' }}
+          # 手动触发时需要显式传 PR 编号；pull_request_target 触发时留空，由事件上下文提供
+          pull-request: ${{ inputs.pr }}

@@ -1,9 +1,12 @@
 # 定期巡检。
 #
-# 两个要点：
-# 1. 用 pull_request_target 之外的普通 schedule 事件，且**不检出代码**——
-#    本 Action 只通过接口读文件，检出反而会把不可信内容带进执行环境。
-# 2. 报告写到常设 Issue（或 Wiki）。不要用 open 状态的 Issue 当载体，那会持续要求注意力。
+# 三个要点：
+# 1. 用 schedule 事件，不涉及 PR，所以没有「不可信代码进执行环境」的问题。
+# 2. **这里确实 checkout 了主分支**，但目的不是让 Action 读代码——它通过接口读。
+#    checkout 只为了把本期历史写回 `.acr/inspection-history.json` 并提交。
+#    这与 `review.yml` 里「绝不 checkout PR 代码」的约束不冲突：那里检出的是不可信内容，
+#    这里检出的是主分支自己的代码。
+# 3. 报告写到常设 Issue（或 Wiki）。不要用 open 状态的 Issue 当载体，那会持续要求注意力。
 name: 代码巡检
 
 on:
@@ -26,7 +29,8 @@ jobs:
         with:
           mode: inspect
           api-key: ${{ secrets.AI_REVIEW_API_KEY }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # 不传 github-token：action.yml 会回落到内置的 github.token。
+          # 写成 secrets.GITHUB_TOKEN 虽然也能用，但那个名字容易让人以为自己要建一个同名 secret
 
       # 历史文件进仓库后，趋势在本地跑与 CI 跑之间是连续的
       - name: 提交本期历史

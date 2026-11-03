@@ -16,9 +16,13 @@ inputs:
     description: 模型服务的密钥（BYOK）。请放在仓库 secret 里，不要写进配置文件
     required: true
   github-token:
-    description: GitHub 令牌。默认用内置令牌，无需自建
+    description: GitHub 令牌。默认用内置令牌，无需自建；只有在需要跨仓库写入时才传自己的
     required: false
-    default: ${{ github.token }}
+    default: ''
+  pull-request:
+    description: PR 编号。从事件上下文自动取，手动触发（workflow_dispatch）时才需要填
+    required: false
+    default: ${{ github.event.pull_request.number }}
   mode:
     description: review 真发评论；dry-run 只打印；inspect 巡检并写报告
     required: false
@@ -37,10 +41,19 @@ runs:
       env:
         # 零配置：仓库与编号都从事件上下文里来，接入方不需要额外配置
         ACR_REPOSITORY: ${{ github.repository }}
-        ACR_PULL_REQUEST: ${{ github.event.pull_request.number }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ACR_PULL_REQUEST: ${{ inputs.pull-request }}
+        # 不传自己的令牌时回落到内置令牌。不用 inputs 的 default 填 github.token：
+        # 那个上下文在 inputs 默认值里能否解析，各版本表现不一致，写在 env 里可以确定生效
+        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
         AI_REVIEW_API_KEY: ${{ inputs.api-key }}
       run: |
+        # 缺密钥时立刻停下并说清怎么办。让它带着空 key 去调模型，只会得到一个
+        # 401，而 401 在日志里看起来像是 key 错了，实际是根本没配
+        if [ -z "$AI_REVIEW_API_KEY" ]; then
+          echo "::error::缺少 AI_REVIEW_API_KEY。请在仓库 Settings → Secrets and variables → Actions 里新建 secret，变量名与 .ai-review.yml 的 llm.apiKeyEnv 保持一致（默认 AI_REVIEW_API_KEY）"
+          exit 3
+        fi
+
         # inspect 走 --write 才会把报告写到 Issue / Wiki；其余模式照原样透传
         if [ "${{ inputs.mode }}" = "inspect" ]; then
           node "${{ github.action_path }}/dist/cli.js" inspect --write
