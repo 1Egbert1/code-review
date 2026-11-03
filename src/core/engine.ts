@@ -28,6 +28,13 @@ import {
 } from './context/crossfile.js';
 import { buildSymbolIndex } from './context/symbols.js';
 import { buildLineIndex } from './diff/index-lines.js';
+import {
+  CHECKPOINT_VERSION,
+  computeConfigHash,
+  computePromptHash,
+  decideCheckpoint,
+} from './reconcile/checkpoint.js';
+import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
@@ -60,6 +67,17 @@ export interface EngineDeps {
   readonly now?: () => string;
   /** 逐条进度回调，命令行用来打印过程 */
   readonly onProgress?: (message: string) => void;
+  /**
+   * 检查点依赖。默认关闭；启用时必须提供 isAncestor 与 fetchIncremental，
+   * 任一环节存疑就退回全量（fail-closed）。
+   */
+  readonly checkpoint?: {
+    readonly summary: { readonly body: string; readonly author: string } | null;
+    readonly expectedAuthor: string | null;
+    readonly isAncestor: (previousHead: string, currentHead: string) => Promise<boolean>;
+    /** 取增量改动；返回 null 或抛错都视为不可用 */
+    readonly fetchIncremental: (from: string, to: string) => Promise<ParsedDiff | null>;
+  };
 }
 
 interface CallTotals {
@@ -126,7 +144,60 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
   // ── 取 ────────────────────────────────────────────────────────────────
   const snapshot = await deps.fetchSnapshot(request);
-  const diff: ParsedDiff = snapshot.diff;
+  let diff: ParsedDiff = snapshot.diff;
+
+  const promptVersions = {
+    correctness: correctnessReviewer.promptVersion,
+    security: securityReviewer.promptVersion,
+    convention: conventionReviewer.promptVersion,
+  };
+  const configHash = computeConfigHash(deps.config);
+  const promptHash = computePromptHash(promptVersions);
+
+  // 检查点只决定「审哪一段」，行号仍然按最新改动重算（见规格书 8.6 末段）
+  if (deps.config.review.checkpoint && deps.checkpoint !== undefined) {
+    const decision = await decideCheckpoint({
+      enabled: true,
+      summary: deps.checkpoint.summary,
+      expectedAuthor: deps.checkpoint.expectedAuthor,
+      current: { headSha: diff.headSha, baseSha: diff.baseSha, configHash, promptHash },
+      isAncestor: deps.checkpoint.isAncestor,
+    });
+
+    if (decision.use) {
+      try {
+        const incremental = await deps.checkpoint.fetchIncremental(decision.from, decision.to);
+        if (incremental !== null) {
+          diff = incremental;
+          progress(
+            `检查点命中，只审 ${decision.from.slice(0, 7)}..${decision.to.slice(0, 7)} 的增量`,
+          );
+        } else {
+          warnings.push({
+            kind: 'other',
+            message: '取增量改动失败，已退回全量审查',
+            target: null,
+          });
+        }
+      } catch (error) {
+        warnings.push({
+          kind: 'other',
+          message: `取增量改动失败，已退回全量审查：${asMessage(error)}`,
+          target: null,
+        });
+      }
+    } else if (
+      decision.reason === 'foreign-author' ||
+      decision.reason === 'unparsable' ||
+      decision.reason === 'not-ancestor' ||
+      decision.reason === 'basis-changed' ||
+      decision.reason === 'base-moved'
+    ) {
+      // 这些情况说明「本该能增量却没敢用」，用户需要知道为什么这轮又全量了
+      warnings.push({ kind: 'other', message: `未使用检查点：${decision.detail}`, target: null });
+    }
+  }
+
   const index = buildLineIndex(diff);
   progress(
     `取到 ${String(diff.files.length)} 个文件，基准 ${diff.baseSha.slice(0, 7)} → ${diff.headSha.slice(0, 7)}`,
@@ -171,10 +242,15 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
-        const result = await runWithRetry(deps, SPECS.correctness, { file: file.path, segments }, (input) => {
-          const shrunk = shrinkToChangedOnly(input);
-          return shrunk === null ? null : { ...input, segments: shrunk };
-        });
+        const result = await runWithRetry(
+          deps,
+          SPECS.correctness,
+          { file: file.path, segments },
+          (input) => {
+            const shrunk = shrinkToChangedOnly(input);
+            return shrunk === null ? null : { ...input, segments: shrunk };
+          },
+        );
 
         totals.calls += result.calls;
         totals.usage = sumUsage(totals.usage, result.usage);
@@ -334,13 +410,12 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
     baseSha: diff.baseSha,
     headSha: diff.headSha,
     trimmedSegments: bundle.trim.dropped.length,
-    promptVersions: {
-      correctness: correctnessReviewer.promptVersion,
-      security: securityReviewer.promptVersion,
-      convention: conventionReviewer.promptVersion,
-    },
+    promptVersions,
     warnings: [...warnings, ...plan.warnings],
     rejectedCount: allRejections.length,
+    ...(deps.config.review.checkpoint
+      ? { checkpoint: buildCheckpointState(diff, configHash, promptHash) }
+      : {}),
   });
 
   // ── 发 ────────────────────────────────────────────────────────────────
@@ -447,6 +522,21 @@ async function runWithRetry(
     ...second,
     calls: first.calls + second.calls,
     usage: sumUsage(first.usage, second.usage),
+  };
+}
+
+function buildCheckpointState(
+  diff: ParsedDiff,
+  configHash: string,
+  promptHash: string,
+): CheckpointState {
+  return {
+    version: CHECKPOINT_VERSION,
+    headSha: diff.headSha,
+    baseSha: diff.baseSha,
+    configHash,
+    promptHash,
+    reviewedAt: new Date().toISOString(),
   };
 }
 

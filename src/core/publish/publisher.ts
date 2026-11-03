@@ -77,7 +77,6 @@ function createThrottle(
   };
 }
 
-
 /**
  * 限流重试。
  *
@@ -132,14 +131,18 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
       if (action.target !== 'inline') continue;
 
       await throttle();
-      const result = await withRetry(() => port.createInline(
-        {
-          path: action.finding.anchor.file,
-          line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
-          side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
-        },
-        action.body,
-      ), sleep);
+      const result = await withRetry(
+        () =>
+          port.createInline(
+            {
+              path: action.finding.anchor.file,
+              line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
+              side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
+            },
+            action.body,
+          ),
+        sleep,
+      );
 
       if (!record('create', result)) continue;
       created += 1;
@@ -161,14 +164,18 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
     if (action.kind === 'replace') {
       // 先发新的再处理旧的：顺序反了的话，新评论发失败就彻底丢了这条意见
       await throttle();
-      const createdResult = await withRetry(() => port.createInline(
-        {
-          path: action.finding.anchor.file,
-          line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
-          side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
-        },
-        action.body,
-      ), sleep);
+      const createdResult = await withRetry(
+        () =>
+          port.createInline(
+            {
+              path: action.finding.anchor.file,
+              line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
+              side: action.finding.anchor.kind === 'removed' ? 'old' : 'new',
+            },
+            action.body,
+          ),
+        sleep,
+      );
 
       if (!record('replace', createdResult)) continue;
       replaced += 1;
@@ -237,7 +244,10 @@ export async function publish(options: PublishOptions): Promise<PublishOutcome> 
       const result = await withRetry(() => port.createThread(options.summaryBody ?? ''), sleep);
       summary = record('summary-create', result) ? 'created' : 'failed';
     } else {
-      const result = await withRetry(() => port.update(existing.commentId, options.summaryBody ?? ''), sleep);
+      const result = await withRetry(
+        () => port.update(existing.commentId, options.summaryBody ?? ''),
+        sleep,
+      );
       summary = record('summary-update', result) ? 'updated' : 'failed';
     }
   }

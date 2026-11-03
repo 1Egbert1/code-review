@@ -209,3 +209,65 @@ describe('总控：五步走通', () => {
     expect(writes).toBe(0);
   });
 });
+
+describe('检查点', () => {
+  const withCheckpoint = (): ResolvedConfig => ({
+    ...config(),
+    review: { ...config().review, checkpoint: true },
+  });
+
+  it('默认关闭：即使给了依赖也不启用', async () => {
+    const result = await runReview(REQUEST, {
+      config: config(),
+      client: client(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+      checkpoint: {
+        summary: null,
+        expectedAuthor: null,
+        isAncestor: () => Promise.resolve(true),
+        fetchIncremental: () => {
+          throw new Error('不该被调用');
+        },
+      },
+    });
+
+    expect(result.coverage.planned).toBe(1);
+  });
+
+  it('检查点可信但取不到增量时退回全量并告警', async () => {
+    const result = await runReview(REQUEST, {
+      config: withCheckpoint(),
+      client: client(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+      checkpoint: {
+        summary: null,
+        expectedAuthor: 'bot',
+        isAncestor: () => Promise.resolve(true),
+        fetchIncremental: () => Promise.resolve(null),
+      },
+    });
+
+    // summary 为 null → 判定 no-summary，直接全量；没有增量可退，因此不该出现「退回全量」告警
+    expect(result.warnings.some((warning) => warning.message.includes('退回全量'))).toBe(false);
+    expect(result.coverage.planned).toBe(1);
+  });
+
+  it('作者对不上时告警说明为什么这轮又全量了', async () => {
+    const result = await runReview(REQUEST, {
+      config: withCheckpoint(),
+      client: client(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+      checkpoint: {
+        summary: { body: '别人的摘要', author: 'someone' },
+        expectedAuthor: 'bot',
+        isAncestor: () => Promise.resolve(true),
+        fetchIncremental: () => Promise.resolve(null),
+      },
+    });
+
+    expect(result.warnings.some((warning) => warning.message.includes('未使用检查点'))).toBe(true);
+  });
+});

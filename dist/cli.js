@@ -10046,6 +10046,103 @@ function lookupAnchor(index, file, line, side) {
   return table.get(file)?.get(line) ?? null;
 }
 
+// src/core/reconcile/checkpoint.ts
+import { createHash } from "node:crypto";
+var CHECKPOINT_VERSION = "v1";
+var CHECKPOINT_PATTERN = /<!--\s*acr:v1\|kind=checkpoint\|([^>]*?)-->/;
+function renderCheckpoint(state) {
+  const fields = [
+    `kind=checkpoint`,
+    `head=${state.headSha}`,
+    `base=${state.baseSha}`,
+    `cfg=${state.configHash}`,
+    `pv=${state.promptHash}`,
+    `at=${state.reviewedAt}`
+  ];
+  return `<!-- acr:v1|${fields.join("|")} -->`;
+}
+function parseCheckpoint(body) {
+  const match = CHECKPOINT_PATTERN.exec(body);
+  if (match === null) return null;
+  const fields = /* @__PURE__ */ new Map();
+  for (const segment of (match[1] ?? "").split("|")) {
+    const index = segment.indexOf("=");
+    if (index <= 0) continue;
+    fields.set(segment.slice(0, index).trim(), segment.slice(index + 1).trim());
+  }
+  const headSha = fields.get("head");
+  const baseSha = fields.get("base");
+  const configHash = fields.get("cfg");
+  const promptHash = fields.get("pv");
+  if (headSha === void 0 || baseSha === void 0) return null;
+  if (configHash === void 0 || promptHash === void 0) return null;
+  return {
+    version: CHECKPOINT_VERSION,
+    headSha,
+    baseSha,
+    configHash,
+    promptHash,
+    reviewedAt: fields.get("at") ?? ""
+  };
+}
+function stableHash(value) {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex").slice(0, 16);
+}
+function computeConfigHash(config) {
+  const dimensions = Object.entries(config.review.dimensions).sort(([a], [b]) => a.localeCompare(b)).map(([name, setting]) => [name, setting.enabled, setting.severityFloor]);
+  return stableHash({ dimensions, model: config.llm.model });
+}
+function computePromptHash(versions) {
+  const sorted = Object.entries(versions).sort(([a], [b]) => a.localeCompare(b));
+  return stableHash(sorted);
+}
+async function decideCheckpoint(input) {
+  if (!input.enabled) return { use: false, reason: "disabled", detail: "\u672A\u542F\u7528\u68C0\u67E5\u70B9" };
+  if (input.summary === null) {
+    return { use: false, reason: "no-summary", detail: "\u6CA1\u6709\u627E\u5230\u4E0A\u4E00\u8F6E\u7684\u6458\u8981\u8BC4\u8BBA" };
+  }
+  if (input.expectedAuthor === null) {
+    return { use: false, reason: "foreign-author", detail: "\u65E0\u6CD5\u786E\u8BA4\u6458\u8981\u4F5C\u8005\uFF0C\u6309\u5B58\u7591\u5904\u7406" };
+  }
+  if (input.summary.author !== input.expectedAuthor) {
+    return {
+      use: false,
+      reason: "foreign-author",
+      detail: `\u6458\u8981\u7531 ${input.summary.author} \u53D1\u5E03\uFF0C\u4E0D\u662F\u672C\u4EE4\u724C\uFF08${input.expectedAuthor}\uFF09`
+    };
+  }
+  const state = parseCheckpoint(input.summary.body);
+  if (state === null) {
+    return { use: false, reason: "unparsable", detail: "\u6458\u8981\u91CC\u8BFB\u4E0D\u51FA\u68C0\u67E5\u70B9\uFF0C\u53EF\u80FD\u7248\u672C\u4E0D\u7B26" };
+  }
+  if (state.baseSha !== input.current.baseSha) {
+    return {
+      use: false,
+      reason: "base-moved",
+      detail: `\u57FA\u51C6\u5206\u652F\u5DF2\u79FB\u52A8\uFF08${state.baseSha.slice(0, 7)} \u2192 ${input.current.baseSha.slice(0, 7)}\uFF09\uFF0C\u884C\u53F7\u57FA\u51C6\u53D8\u4E86`
+    };
+  }
+  if (state.configHash !== input.current.configHash || state.promptHash !== input.current.promptHash) {
+    return {
+      use: false,
+      reason: "basis-changed",
+      detail: "\u914D\u7F6E\u6216\u63D0\u793A\u8BCD\u7248\u672C\u5DF2\u53D8\u5316\uFF0C\u4E24\u8F6E\u7ED3\u8BBA\u4E0D\u53EF\u6BD4"
+    };
+  }
+  if (state.headSha === input.current.headSha) {
+    return { use: false, reason: "nothing-new", detail: "\u5934\u90E8\u672A\u53D8\u5316\uFF0C\u6CA1\u6709\u65B0\u589E\u63D0\u4EA4" };
+  }
+  const ancestor = await input.isAncestor(state.headSha, input.current.headSha).catch(() => false);
+  if (!ancestor) {
+    return {
+      use: false,
+      reason: "not-ancestor",
+      detail: "\u65E0\u6CD5\u8BC1\u660E\u68C0\u67E5\u70B9\u662F\u5F53\u524D\u5934\u90E8\u7684\u7956\u5148\uFF08\u53EF\u80FD\u88AB\u5F3A\u63A8\u6216\u53D8\u57FA\uFF09"
+    };
+  }
+  return { use: true, from: state.headSha, to: input.current.headSha };
+}
+
 // src/core/reconcile/plan.ts
 function positionOf(finding) {
   const { anchor } = finding;
@@ -10269,6 +10366,7 @@ function renderSummary(input) {
     notes.push(`- ${warning.message}`);
   }
   blocks.push(["## \u672C\u8F6E\u8BF4\u660E", ...notes].join("\n"));
+  if (input.checkpoint !== void 0) blocks.push(renderCheckpoint(input.checkpoint));
   blocks.push(SUMMARY_MARKER);
   return blocks.join("\n\n");
 }
@@ -10329,14 +10427,17 @@ async function publish(options) {
     if (action.kind === "create") {
       if (action.target !== "inline") continue;
       await throttle();
-      const result = await withRetry(() => port.createInline(
-        {
-          path: action.finding.anchor.file,
-          line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
-          side: action.finding.anchor.kind === "removed" ? "old" : "new"
-        },
-        action.body
-      ), sleep);
+      const result = await withRetry(
+        () => port.createInline(
+          {
+            path: action.finding.anchor.file,
+            line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
+            side: action.finding.anchor.kind === "removed" ? "old" : "new"
+          },
+          action.body
+        ),
+        sleep
+      );
       if (!record("create", result)) continue;
       created += 1;
       if (checkReadback && result.ok) {
@@ -10354,14 +10455,17 @@ async function publish(options) {
     }
     if (action.kind === "replace") {
       await throttle();
-      const createdResult = await withRetry(() => port.createInline(
-        {
-          path: action.finding.anchor.file,
-          line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
-          side: action.finding.anchor.kind === "removed" ? "old" : "new"
-        },
-        action.body
-      ), sleep);
+      const createdResult = await withRetry(
+        () => port.createInline(
+          {
+            path: action.finding.anchor.file,
+            line: action.finding.anchor.newLine ?? action.finding.anchor.oldLine ?? 0,
+            side: action.finding.anchor.kind === "removed" ? "old" : "new"
+          },
+          action.body
+        ),
+        sleep
+      );
       if (!record("replace", createdResult)) continue;
       replaced += 1;
       await throttle();
@@ -10416,7 +10520,10 @@ ${current.body}`
       const result = await withRetry(() => port.createThread(options.summaryBody ?? ""), sleep);
       summary = record("summary-create", result) ? "created" : "failed";
     } else {
-      const result = await withRetry(() => port.update(existing.commentId, options.summaryBody ?? ""), sleep);
+      const result = await withRetry(
+        () => port.update(existing.commentId, options.summaryBody ?? ""),
+        sleep
+      );
       summary = record("summary-update", result) ? "updated" : "failed";
     }
   }
@@ -11110,7 +11217,7 @@ async function runReviewer(options) {
 }
 
 // src/core/reconcile/fingerprint.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 function normalize(evidence) {
   return evidence.replace(/\s+/g, " ").trim();
 }
@@ -11118,7 +11225,7 @@ function computeFingerprint(input) {
   const payload = [input.file, input.reviewer, input.title, normalize(input.evidence)].join(
     "\0"
   );
-  return createHash("sha256").update(payload, "utf8").digest("hex").slice(0, 16);
+  return createHash2("sha256").update(payload, "utf8").digest("hex").slice(0, 16);
 }
 
 // src/core/verify/evidence.ts
@@ -11428,7 +11535,48 @@ async function runReview(request2, deps) {
   const progress = deps.onProgress ?? (() => {
   });
   const snapshot = await deps.fetchSnapshot(request2);
-  const diff = snapshot.diff;
+  let diff = snapshot.diff;
+  const promptVersions = {
+    correctness: correctnessReviewer.promptVersion,
+    security: securityReviewer.promptVersion,
+    convention: conventionReviewer.promptVersion
+  };
+  const configHash = computeConfigHash(deps.config);
+  const promptHash = computePromptHash(promptVersions);
+  if (deps.config.review.checkpoint && deps.checkpoint !== void 0) {
+    const decision = await decideCheckpoint({
+      enabled: true,
+      summary: deps.checkpoint.summary,
+      expectedAuthor: deps.checkpoint.expectedAuthor,
+      current: { headSha: diff.headSha, baseSha: diff.baseSha, configHash, promptHash },
+      isAncestor: deps.checkpoint.isAncestor
+    });
+    if (decision.use) {
+      try {
+        const incremental = await deps.checkpoint.fetchIncremental(decision.from, decision.to);
+        if (incremental !== null) {
+          diff = incremental;
+          progress(
+            `\u68C0\u67E5\u70B9\u547D\u4E2D\uFF0C\u53EA\u5BA1 ${decision.from.slice(0, 7)}..${decision.to.slice(0, 7)} \u7684\u589E\u91CF`
+          );
+        } else {
+          warnings.push({
+            kind: "other",
+            message: "\u53D6\u589E\u91CF\u6539\u52A8\u5931\u8D25\uFF0C\u5DF2\u9000\u56DE\u5168\u91CF\u5BA1\u67E5",
+            target: null
+          });
+        }
+      } catch (error) {
+        warnings.push({
+          kind: "other",
+          message: `\u53D6\u589E\u91CF\u6539\u52A8\u5931\u8D25\uFF0C\u5DF2\u9000\u56DE\u5168\u91CF\u5BA1\u67E5\uFF1A${asMessage(error)}`,
+          target: null
+        });
+      }
+    } else if (decision.reason === "foreign-author" || decision.reason === "unparsable" || decision.reason === "not-ancestor" || decision.reason === "basis-changed" || decision.reason === "base-moved") {
+      warnings.push({ kind: "other", message: `\u672A\u4F7F\u7528\u68C0\u67E5\u70B9\uFF1A${decision.detail}`, target: null });
+    }
+  }
   const index = buildLineIndex(diff);
   progress(
     `\u53D6\u5230 ${String(diff.files.length)} \u4E2A\u6587\u4EF6\uFF0C\u57FA\u51C6 ${diff.baseSha.slice(0, 7)} \u2192 ${diff.headSha.slice(0, 7)}`
@@ -11464,10 +11612,15 @@ async function runReview(request2, deps) {
     const segments = selectForFile(bundle, file.path);
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
-        const result = await runWithRetry(deps, SPECS.correctness, { file: file.path, segments }, (input) => {
-          const shrunk = shrinkToChangedOnly(input);
-          return shrunk === null ? null : { ...input, segments: shrunk };
-        });
+        const result = await runWithRetry(
+          deps,
+          SPECS.correctness,
+          { file: file.path, segments },
+          (input) => {
+            const shrunk = shrinkToChangedOnly(input);
+            return shrunk === null ? null : { ...input, segments: shrunk };
+          }
+        );
         totals.calls += result.calls;
         totals.usage = sumUsage(totals.usage, result.usage);
         rejections.push(...result.rejections);
@@ -11607,13 +11760,10 @@ async function runReview(request2, deps) {
     baseSha: diff.baseSha,
     headSha: diff.headSha,
     trimmedSegments: bundle.trim.dropped.length,
-    promptVersions: {
-      correctness: correctnessReviewer.promptVersion,
-      security: securityReviewer.promptVersion,
-      convention: conventionReviewer.promptVersion
-    },
+    promptVersions,
     warnings: [...warnings, ...plan.warnings],
-    rejectedCount: allRejections.length
+    rejectedCount: allRejections.length,
+    ...deps.config.review.checkpoint ? { checkpoint: buildCheckpointState(diff, configHash, promptHash) } : {}
   });
   if (deps.port !== null && deps.port !== void 0 && !request2.dryRun) {
     const outcome = await publish({
@@ -11687,6 +11837,16 @@ async function runWithRetry(deps, spec, input, shrink) {
     ...second,
     calls: first.calls + second.calls,
     usage: sumUsage(first.usage, second.usage)
+  };
+}
+function buildCheckpointState(diff, configHash, promptHash) {
+  return {
+    version: CHECKPOINT_VERSION,
+    headSha: diff.headSha,
+    baseSha: diff.baseSha,
+    configHash,
+    promptHash,
+    reviewedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
 function isOverBudget(usage, config) {

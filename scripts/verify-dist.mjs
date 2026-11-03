@@ -20,7 +20,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const committed = join(root, 'dist', 'cli.js');
 const fresh = join(root, 'dist', '.verify.js');
 
-const banner = "import{createRequire as __cr}from 'node:module';const require=__cr(import.meta.url);";
+const banner =
+  "import{createRequire as __cr}from 'node:module';const require=__cr(import.meta.url);";
 
 await build({
   entryPoints: [join(root, 'src', 'cli', 'index.ts')],

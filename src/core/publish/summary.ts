@@ -11,6 +11,8 @@
 
 import type { Finding, ReviewerId, Severity } from '../../contracts/finding.js';
 import type { ReviewWarning } from '../../contracts/result.js';
+import { renderCheckpoint } from '../reconcile/checkpoint.js';
+import type { CheckpointState } from '../reconcile/checkpoint.js';
 import { SUMMARY_MARKER } from '../reconcile/markers.js';
 import { REVIEWER_LABEL, severityLabel } from './render.js';
 
@@ -33,6 +35,8 @@ export interface SummaryInput {
   readonly warnings: readonly ReviewWarning[];
   /** 被校验拦下的条数，只报数不列明细 */
   readonly rejectedCount: number;
+  /** 启用检查点时写入本轮覆盖到的提交，供下一轮做增量 */
+  readonly checkpoint?: CheckpointState;
 }
 
 function countBySeverity(findings: readonly Finding[]): Map<Severity, number> {
@@ -105,6 +109,7 @@ export function renderSummary(input: SummaryInput): string {
   }
 
   blocks.push(['## 本轮说明', ...notes].join('\n'));
+  if (input.checkpoint !== undefined) blocks.push(renderCheckpoint(input.checkpoint));
   blocks.push(SUMMARY_MARKER);
 
   return blocks.join('\n\n');
