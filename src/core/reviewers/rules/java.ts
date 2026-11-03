@@ -1,10 +1,12 @@
 /**
  * Java 规约条目。
  *
- * **来源与合规说明（重要）**：
- * 《阿里巴巴Java开发手册》PDF 页脚写明「禁止用于商业用途，违者必究」，其条文属于受版权保护的
- * 表达，因此这里**不复制任何原文**。做法是：从公开手册中提炼「这条规则要求什么」（规则属于思想，
- * 不受版权保护），再用自己的话写成一句可执行指令。每条都标注 `basis` 说明出处章节。
+ * **来源与提炼原则**：
+ * 条目提炼自《阿里巴巴Java开发手册》v1.3.0，但**不照抄原文**。这不是出于授权顾虑
+ * （本项目为内部工具，不对外分发），而是因为手册原文是写给人读的说明书：
+ * 「及时清理不再使用的代码段」这种句子，模型没法据此判定某一行是否违规。
+ * 审查指令需要的是可判定的触发条件与后果，所以每条都重写成那个形状，并标 `basis`
+ * 指回原章节，便于核对与手册更新时追改。
  *
  * 官方开源的 PMD 实现见 alibaba/p3c（Apache-2.0），可作为规则可执行性的交叉参考。
  *
@@ -22,6 +24,68 @@ const SOURCE = {
   modified: '仅提炼规则要求，用本项目自己的话重写，未复制条文原文',
 } as const;
 
+/**
+ * 规则 id → 它覆盖的手册条款编号。
+ *
+ * 集中成一张表而不是写在每个 rule() 调用里，理由是这两件事的改动节奏不同：
+ * 调措辞改 instruction，动覆盖范围才改这张表。分开放能避免一次措辞调整误改覆盖关系。
+ */
+const CLAUSES_OF: Readonly<Record<string, readonly string[]>> = {
+  'java-naming-case': ['naming-2', 'naming-3', 'naming-4'],
+  'java-naming-no-pinyin': ['naming-1'],
+  'java-boolean-no-is': ['naming-7'],
+  'java-abstract-prefix': ['naming-5'],
+  'java-service-dao-naming': ['naming-14'],
+  'java-no-magic-value': ['const-1'],
+  'java-long-uppercase-l': ['const-2'],
+  'java-override-annotation': ['oop-2'],
+  'java-equals-null-safe': ['oop-6'],
+  'java-wrapper-equals': ['oop-7'],
+  'java-pojo-tostring': ['oop-12'],
+  'java-string-builder-in-loop': ['oop-17'],
+  'java-no-remove-in-foreach': ['coll-7'],
+  'java-arrays-aslist-immutable': ['coll-5'],
+  'java-sublist-caution': ['coll-2', 'coll-3'],
+  'java-collection-capacity': ['coll-9', 'misc-7'],
+  'java-entryset-iteration': ['coll-10'],
+  'java-interface-no-modifier': ['naming-12'],
+  'java-catch-must-handle': ['exc-4'],
+  'java-no-exception-for-flow': ['exc-2'],
+  'java-narrow-try-scope': ['exc-3'],
+  'java-finally-no-return': ['exc-7'],
+  'java-log-slf4j-placeholder': ['log-4'],
+  'java-log-with-context': ['log-6'],
+  'java-test-air': ['test-1'],
+  'java-test-location': ['test-7'],
+  'java-test-coverage': ['test-8'],
+  'java-test-db-independent': ['test-10'],
+  'java-authz-check': ['sec-1'],
+  'java-sql-param-binding': ['sec-3'],
+  'java-input-validation': ['sec-4', 'ctrl-6'],
+  'java-sensitive-mask': ['sec-2'],
+  'java-csrf-protection': ['sec-6'],
+  'java-table-three-fields': ['db-table-9'],
+  'java-decimal-not-float': ['db-table-6'],
+  'java-is-xxx-tinyint': ['db-table-1'],
+  'java-index-naming': ['db-table-5'],
+  'java-varchar-length': ['db-table-8'],
+  'java-no-snapshot-dependency': ['eng-lib-3'],
+  'java-unified-version-variable': ['eng-lib-6'],
+  'java-layer-dependency': ['eng-layer-1'],
+};
+
+/**
+ * 这些规则判断的是 DDL 文本（字段类型、索引、建表必备字段），Java 源码里没有对应物。
+ * 早期一律写 `['java']`，结果普通 Service 文件被注入 5 条建表规约，白占名额还全是误报。
+ */
+const SQL_ONLY = new Set([
+  'java-table-three-fields',
+  'java-decimal-not-float',
+  'java-is-xxx-tinyint',
+  'java-index-naming',
+  'java-varchar-length',
+]);
+
 function rule(
   id: string,
   level: RuleEntry['level'],
@@ -35,7 +99,8 @@ function rule(
     dimension,
     title: instruction.slice(0, 30),
     instruction,
-    languages: ['java'],
+    languages: SQL_ONLY.has(id) ? ['sql'] : ['java'],
+    clauses: CLAUSES_OF[id] ?? [],
     source: { ...SOURCE, basis: `${BASIS_PREFIX} ${basis}` },
   };
 }

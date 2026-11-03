@@ -3,10 +3,10 @@
  *
  * 四条必须想清楚的点：
  *
- * 1. **不复制别人的条文原文。** 三方规范的授权各不相同，而《阿里巴巴Java开发手册》的 PDF
- *    页脚写明「禁止用于商业用途」。表达受版权保护，但**规则本身是思想，不受版权保护**——
- *    所以做法是：只提炼「这条规则要求什么」，用自己的话写成一句可执行指令，并在来源里
- *    标清依据（basis）。这样既合规，也让规则能适配本工具的字段而不是硬搬别人的排版。
+ * 1. **不照抄条文原文，但要能追回原条款。** 规范原文是写给人读的说明书，多数句子无法直接
+ *    当判定条件用（「及时清理」由谁判断？）。所以只提炼「这条要求什么」，重写成可执行的指令，
+ *    并用 `clauses` 记下它覆盖的条款编号、用 `basis` 记下出处章节。`clauses.ts` 负责证明
+ *    手册的每一条都有人管——写成规则，或者明确排除。
  * 2. **约束力要带进来。** 强制 / 推荐 / 参考三级的处理完全不同：强制要能被门禁挡住，
  *    参考只该提示。丢了这一层，规则库就退化成一张平铺的愿望清单。
  * 3. **不能全量注入。** 一门语言几百条，全塞进去只会稀释注意力。必须按语言筛、按路径筛、
@@ -39,7 +39,8 @@ export type RuleDimension =
   | 'security'
   | 'database'
   | 'architecture'
-  | 'frontend';
+  | 'frontend'
+  | 'format';
 
 export const DIMENSION_LABEL: Readonly<Record<RuleDimension, string>> = {
   naming: '命名',
@@ -50,6 +51,7 @@ export const DIMENSION_LABEL: Readonly<Record<RuleDimension, string>> = {
   database: '数据库',
   architecture: '工程结构',
   frontend: '前端工程',
+  format: '格式',
 };
 
 /** 约束力对应的严重度。强制能被门禁挡住，参考只提示。 */
@@ -86,6 +88,13 @@ export interface RuleEntry {
   readonly languages: readonly string[];
   /** 仅在这些路径下注入；空数组表示不限 */
   readonly pathPatterns?: readonly string[];
+  /**
+   * 这条规则覆盖的规范条款编号。
+   *
+   * 它不是装饰：`coverage.ts` 用「所有条款都必须被某条规则或某条排除说明认领」
+   * 来证明覆盖无遗漏。加规则时忘了填，测试会直接报出来。
+   */
+  readonly clauses?: readonly string[];
   readonly source: RuleSource;
 }
 
@@ -126,6 +135,9 @@ export function languageOf(path: string): string {
       return 'rust';
     case 'sql':
       return 'sql';
+    // MyBatis 的 SQL 写在 mapper.xml 里，不认这个扩展名就永远查不到 ${} 这类问题
+    case 'xml':
+      return 'xml';
     default:
       return '*';
   }
@@ -161,17 +173,45 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${out}$`);
 }
 
+/**
+ * 路径是否像测试文件。
+ *
+ * 只看目录与文件名，不看内容——判断这条的成本必须低，它每注入一条规则就要算一次。
+ * 认 Maven/Gradle 的 `src/test/`、常见的 `test/` `tests/` 目录，以及 `XxxTest.java` 命名。
+ */
+export function isTestPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  if (lower.includes('/src/test/') || lower.includes('/test/') || lower.includes('/tests/'))
+    return true;
+  if (lower.includes('/__tests__/') || lower.includes('/spec/')) return true;
+  return /(test|tests|spec)\.(java|kt|ts|tsx|js|jsx|py|go)$/.test(lower);
+}
+
 function matchesAny(path: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => globToRegExp(pattern).test(path));
 }
 
 export interface SelectOptions {
   readonly path: string | null;
+  /**
+   * 显式指定语言，覆盖从 path 推断的结果。
+   *
+   * 用途是全局视角（path 为 null）时仍能按「本次改动涉及的语言」取规则：
+   * 不指定的话 language 会变成 `*`，而语言特定规则都不含 `*`，一条都取不到。
+   */
+  readonly language?: string;
   readonly limit?: number;
   /** 只看某些维度 */
   readonly dimensions?: readonly RuleDimension[];
   /** 只看某些约束力等级 */
   readonly levels?: readonly RuleLevel[];
+  /**
+   * 是否注入格式类规则。默认否。
+   *
+   * 格式由格式化工具强制，AI 再说一遍是纯负收益。只有在项目**没有**任何格式化配置时，
+   * 才值得把它注进去——那时确实没人管缩进和空格。
+   */
+  readonly includeFormat?: boolean;
 }
 
 const LEVEL_RANK: Readonly<Record<RuleLevel, number>> = {
@@ -195,6 +235,8 @@ const DIMENSION_RANK: Readonly<Record<RuleDimension, number>> = {
   architecture: 5,
   naming: 6,
   frontend: 7,
+  // 格式排最后：它几乎总是被格式化工具接管，只在没有工具时才值得占名额
+  format: 8,
 };
 
 /**
@@ -206,12 +248,15 @@ const DIMENSION_RANK: Readonly<Record<RuleDimension, number>> = {
 export function selectRules(library: RuleLibrary, options: SelectOptions): RuleEntry[] {
   const limit = options.limit ?? MAX_INJECTED_RULES;
   const path = options.path;
-  const language = path === null ? '*' : languageOf(path);
+  const language = options.language ?? (path === null ? '*' : languageOf(path));
 
   const applicable = library.entries.filter((entry) => {
     if (options.levels !== undefined && !options.levels.includes(entry.level)) return false;
     if (options.dimensions !== undefined && !options.dimensions.includes(entry.dimension))
       return false;
+    if (entry.dimension === 'format' && options.includeFormat !== true) return false;
+    // 单测规则只在测试文件里有意义：注入到业务类上，模型只能对着业务代码讲「你要写测试」
+    if (entry.dimension === 'unit-test' && path !== null && !isTestPath(path)) return false;
 
     const languageOk = entry.languages.includes('*') || entry.languages.includes(language);
     if (!languageOk) return false;
@@ -225,17 +270,52 @@ export function selectRules(library: RuleLibrary, options: SelectOptions): RuleE
 
   const specificity = (entry: RuleEntry): number => ((entry.pathPatterns ?? []).length > 0 ? 1 : 0);
 
-  return [...applicable]
-    .sort((a, b) => {
-      const byLevel = LEVEL_RANK[a.level] - LEVEL_RANK[b.level];
-      if (byLevel !== 0) return byLevel;
+  const byRules = [...applicable].sort((a, b) => {
+    const byLevel = LEVEL_RANK[a.level] - LEVEL_RANK[b.level];
+    if (byLevel !== 0) return byLevel;
+    return specificity(b) - specificity(a);
+  });
 
-      const byDimension = DIMENSION_RANK[a.dimension] - DIMENSION_RANK[b.dimension];
-      if (byDimension !== 0) return byDimension;
+  return interleaveByDimension(byRules, limit);
+}
 
-      return specificity(b) - specificity(a);
-    })
-    .slice(0, limit);
+/**
+ * 按维度轮转取，而不是全局排序后截断。
+ *
+ * 全局排序的问题是**强者通吃**：安全与异常两类的强制项最多，排在前面就把名额占满，
+ * 编程、并发、数据库全被挤掉。而现实代码里 `equals`、`@PreDestroy`、SQL 拼接这些问题
+ * 一样常见——审查只挑安全，作者会觉得「它只会喊安全」。
+ *
+ * 轮转保证每个维度都有份额，维度之间的先后由 DIMENSION_RANK 决定（越靠前每轮先取）。
+ * 组内仍然按约束力排序，所以强制项依然优先于参考项。
+ */
+export function interleaveByDimension(rules: readonly RuleEntry[], limit: number): RuleEntry[] {
+  const groups = new Map<RuleDimension, RuleEntry[]>();
+  for (const entry of rules) {
+    const list = groups.get(entry.dimension) ?? [];
+    list.push(entry);
+    groups.set(entry.dimension, list);
+  }
+
+  const order = [...groups.keys()].sort((a, b) => DIMENSION_RANK[a] - DIMENSION_RANK[b]);
+  const picked: RuleEntry[] = [];
+  let round = 0;
+
+  while (picked.length < limit) {
+    let added = false;
+    for (const dimension of order) {
+      if (picked.length >= limit) break;
+      const entry = groups.get(dimension)?.[round];
+      if (entry === undefined) continue;
+      picked.push(entry);
+      added = true;
+    }
+    // 一轮下来一条都没取到，说明所有组都取完了
+    if (!added) break;
+    round += 1;
+  }
+
+  return picked;
 }
 
 const LEVEL_LABEL: Readonly<Record<RuleLevel, string>> = {

@@ -10462,7 +10462,7 @@ var GENERAL_RULES = [
   }
 ];
 
-// src/core/reviewers/rules/java.ts
+// src/core/reviewers/rules/java-build.ts
 var BASIS_PREFIX = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
 var SOURCE3 = {
   name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
@@ -10470,7 +10470,125 @@ var SOURCE3 = {
   license: "own",
   modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
 };
-function rule2(id, level, dimension, instruction, basis) {
+function rule2(id, level, dimension, instruction, clause, languages, basis) {
+  return {
+    id,
+    level,
+    dimension,
+    title: instruction.slice(0, 30),
+    instruction,
+    languages,
+    clauses: clause,
+    source: { ...SOURCE3, basis: `${BASIS_PREFIX} ${basis}` }
+  };
+}
+var JAVA_BUILD_RULES = {
+  entries: [
+    // ── 应用分层 ──────────────────────────────────────────────────────────
+    rule2(
+      "java-dao-exception-wrap",
+      "reference",
+      "architecture",
+      "DAO \u5C42\u628A\u5E95\u5C42\u5F02\u5E38\u7EDF\u4E00\u5305\u88C5\u6210\u81EA\u5B9A\u4E49\u5F02\u5E38\u518D\u4E0A\u629B\uFF0C\u4E14\u4E0D\u5728\u8FD9\u91CC\u6253\u65E5\u5FD7\u2014\u2014\u65E5\u5FD7\u7531\u66F4\u4E0A\u5C42\u5728\u62FF\u5230\u5B8C\u6574\u4E0A\u4E0B\u6587\u540E\u6253\u4E00\u6B21\u3002",
+      ["eng-layer-2"],
+      ["java"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u5E94\u7528\u5206\u5C42"
+    ),
+    rule2(
+      "java-domain-model-naming",
+      "reference",
+      "architecture",
+      "\u9886\u57DF\u6A21\u578B\u6309\u804C\u8D23\u5206\u5F00\uFF1ADO \u5BF9\u5E94\u8868\u7ED3\u6784\u3001DTO \u7528\u4E8E\u8DE8\u5C42\u4F20\u8F93\u3001VO \u7528\u4E8E\u5C55\u793A\uFF0C\u4E0D\u8981\u628A\u4E09\u8005\u5408\u6210\u4E00\u4E2A\u7C7B\u3002",
+      ["eng-layer-3"],
+      ["java"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u5E94\u7528\u5206\u5C42"
+    ),
+    // ── 二方库依赖 ────────────────────────────────────────────────────────
+    rule2(
+      "java-gav-format",
+      "mandatory",
+      "architecture",
+      "GroupID \u6309 com.{\u516C\u53F8}.{\u4E1A\u52A1\u7EBF}[.{\u5B50\u4E1A\u52A1\u7EBF}] \u7EC4\u7EC7\uFF0C\u6700\u591A\u56DB\u7EA7\uFF1BArtifactID \u7528\u4EA7\u54C1\u7EBF\u540D\u3002",
+      ["eng-lib-1"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
+    ),
+    rule2(
+      "java-semver-format",
+      "mandatory",
+      "architecture",
+      "\u4E8C\u65B9\u5E93\u7248\u672C\u53F7\u7528\u300C\u4E3B.\u6B21.\u4FEE\u8BA2\u300D\u4E09\u6BB5\u5F0F\uFF1A\u4E3B\u7248\u672C\u5BF9\u5E94\u4E0D\u517C\u5BB9\u6539\u52A8\uFF0C\u6B21\u7248\u672C\u5BF9\u5E94\u517C\u5BB9\u7684\u65B0\u529F\u80FD\uFF0C\u4FEE\u8BA2\u5BF9\u5E94\u517C\u5BB9\u7684\u95EE\u9898\u4FEE\u590D\u3002",
+      ["eng-lib-2"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
+    ),
+    rule2(
+      "java-api-no-enum-return",
+      "mandatory",
+      "architecture",
+      "\u4E8C\u65B9\u5E93\u5BF9\u5916\u63A5\u53E3\u7684\u8FD4\u56DE\u503C\u4E0D\u4F7F\u7528\u679A\u4E3E\u7C7B\u578B\uFF08\u4E5F\u4E0D\u653E\u5728\u8FD4\u56DE\u7684 POJO \u91CC\uFF09\uFF1A\u8C03\u7528\u65B9\u5347\u7EA7\u4E0D\u540C\u6B65\u65F6\u65E0\u6CD5\u53CD\u5E8F\u5217\u5316\u3002",
+      ["eng-lib-5"],
+      ["java"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
+    ),
+    rule2(
+      "java-duplicate-artifact-version",
+      "mandatory",
+      "architecture",
+      "\u540C\u4E00\u4E2A GroupId + ArtifactId \u5728\u540C\u4E00\u4EFD pom \u91CC\u4E0D\u5F97\u58F0\u660E\u4E24\u4E2A\u4E0D\u540C\u7248\u672C\uFF0C\u9760 dependencyManagement \u7EDF\u4E00\u3002",
+      ["eng-lib-7"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
+    ),
+    rule2(
+      "java-pom-dependency-blocks",
+      "recommended",
+      "architecture",
+      "\u4F9D\u8D56\u58F0\u660E\u653E <dependencies>\uFF0C\u7248\u672C\u7EDF\u4E00\u653E <dependencyManagement>\uFF0C\u4E24\u8005\u4E0D\u8981\u6DF7\u5199\u3002",
+      ["eng-lib-8"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
+    ),
+    // ── 服务器 ────────────────────────────────────────────────────────────
+    rule2(
+      "java-jvm-heapdump",
+      "recommended",
+      "architecture",
+      "JVM \u542F\u52A8\u53C2\u6570\u52A0 -XX:+HeapDumpOnOutOfMemoryError \u5E76\u6307\u5B9A dump \u8DEF\u5F84\uFF0C\u5426\u5219 OOM \u73B0\u573A\u76F4\u63A5\u4E22\u5931\u3002",
+      ["eng-server-3"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u670D\u52A1\u5668"
+    ),
+    rule2(
+      "java-jvm-heap-fixed",
+      "recommended",
+      "architecture",
+      "\u7EBF\u4E0A\u73AF\u5883 -Xms \u4E0E -Xmx \u8BBE\u6210\u76F8\u540C\u503C\uFF0C\u907F\u514D\u5806\u4F38\u7F29\u5E26\u6765\u7684\u989D\u5916 GC \u538B\u529B\u3002",
+      ["eng-server-4"],
+      ["xml"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u670D\u52A1\u5668"
+    ),
+    rule2(
+      "java-redirect-internal",
+      "reference",
+      "architecture",
+      "\u670D\u52A1\u5668\u5185\u90E8\u8DF3\u8F6C\u7528 forward\uFF0C\u5916\u90E8\u5730\u5740\u7528\u7EDF\u4E00\u7684 URL \u62FC\u88C5\u5DE5\u5177\u751F\u6210\uFF0C\u4E0D\u8981\u624B\u5199\u5B57\u7B26\u4E32\u62FC\u63A5\u3002",
+      ["eng-server-5"],
+      ["java"],
+      "\u5DE5\u7A0B\u7ED3\u6784\xB7\u670D\u52A1\u5668"
+    )
+  ]
+};
+
+// src/core/reviewers/rules/java-core.ts
+var BASIS_PREFIX2 = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
+var SOURCE4 = {
+  name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
+  url: "https://github.com/alibaba/p3c",
+  license: "own",
+  modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
+};
+function rule3(id, level, dimension, instruction, clause, basis) {
   return {
     id,
     level,
@@ -10478,41 +10596,973 @@ function rule2(id, level, dimension, instruction, basis) {
     title: instruction.slice(0, 30),
     instruction,
     languages: ["java"],
-    source: { ...SOURCE3, basis: `${BASIS_PREFIX} ${basis}` }
+    clauses: clause,
+    source: { ...SOURCE4, basis: `${BASIS_PREFIX2} ${basis}` }
+  };
+}
+var JAVA_CORE_RULES = {
+  entries: [
+    // ── 命名补充 ──────────────────────────────────────────────────────────
+    rule3(
+      "java-array-bracket",
+      "mandatory",
+      "naming",
+      "\u6570\u7EC4\u7684\u4E2D\u62EC\u53F7\u8DDF\u5728\u7C7B\u578B\u540E\u9762\uFF1A\u5199 String[] args\uFF0C\u4E0D\u5199 String args[]\u3002",
+      ["naming-6"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
+    ),
+    rule3(
+      "java-package-naming",
+      "mandatory",
+      "naming",
+      "\u5305\u540D\u5168\u5C0F\u5199\uFF0C\u6BCF\u6BB5\u53EA\u6709\u4E00\u4E2A\u81EA\u7136\u8BED\u4E49\u7684\u82F1\u6587\u5355\u8BCD\uFF0C\u7528\u5355\u6570\u5F62\u5F0F\u3002",
+      ["naming-8"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
+    ),
+    rule3(
+      "java-enum-naming",
+      "reference",
+      "naming",
+      "\u679A\u4E3E\u7C7B\u540D\u4EE5 Enum \u7ED3\u5C3E\uFF0C\u679A\u4E3E\u6210\u5458\u5168\u5927\u5199\u3001\u4E0B\u5212\u7EBF\u5206\u9694\u3002",
+      ["naming-13"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
+    ),
+    // ── OOP 补充 ──────────────────────────────────────────────────────────
+    rule3(
+      "java-static-access",
+      "mandatory",
+      "coding",
+      "\u8BBF\u95EE\u9759\u6001\u6210\u5458\u76F4\u63A5\u7528\u7C7B\u540D\uFF0C\u4E0D\u8981\u7ED5\u5BF9\u8C61\u5F15\u7528\u2014\u2014\u540E\u8005\u4F1A\u8BA9\u4EBA\u8BEF\u4EE5\u4E3A\u5B83\u662F\u5B9E\u4F8B\u6210\u5458\u3002",
+      ["oop-1"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-varargs-type",
+      "mandatory",
+      "coding",
+      "\u53EF\u53D8\u53C2\u6570\u53EA\u5728\u53C2\u6570\u7C7B\u578B\u4E00\u81F4\u3001\u8BED\u4E49\u76F8\u540C\u65F6\u4F7F\u7528\uFF1B\u4E0D\u8981\u7528 Object... \u63A5\u6536\u4EFB\u610F\u53C2\u6570\u3002",
+      ["oop-3"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-signature-stability",
+      "mandatory",
+      "coding",
+      "\u5BF9\u5916\u66B4\u9732\u6216\u4E8C\u65B9\u5E93\u4F9D\u8D56\u7684\u63A5\u53E3\u65B9\u6CD5\u4E0D\u5F97\u968F\u610F\u6539\u7B7E\u540D\uFF1B\u5E9F\u5F03\u65F6\u5FC5\u987B\u6807 @Deprecated \u5E76\u5728\u6CE8\u91CA\u91CC\u5199\u660E\u66FF\u4EE3\u65B9\u6848\u3002",
+      ["oop-4"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-no-deprecated-usage",
+      "mandatory",
+      "coding",
+      "\u65B0\u4EE3\u7801\u4E0D\u5F97\u8C03\u7528\u5DF2\u6807 @Deprecated \u7684\u7C7B\u6216\u65B9\u6CD5\uFF0C\u6539\u7528\u6CE8\u91CA\u91CC\u6307\u51FA\u7684\u66FF\u4EE3\u5B9E\u73B0\u3002",
+      ["oop-5"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-pojo-wrapper-type",
+      "mandatory",
+      "coding",
+      "POJO \u5C5E\u6027\u4E0E RPC \u63A5\u53E3\u7684\u51FA\u5165\u53C2\u4F7F\u7528\u5305\u88C5\u7C7B\u578B\uFF0C\u5C40\u90E8\u53D8\u91CF\u7528\u57FA\u672C\u7C7B\u578B\u2014\u2014POJO \u7528\u57FA\u672C\u7C7B\u578B\u4F1A\u8BA9\u300C\u672A\u8D4B\u503C\u300D\u548C\u300C\u96F6\u503C\u300D\u65E0\u6CD5\u533A\u5206\u3002",
+      ["oop-8"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-pojo-no-default-value",
+      "mandatory",
+      "coding",
+      "DO/DTO/VO \u7684\u5C5E\u6027\u4E0D\u8981\u5199\u9ED8\u8BA4\u503C\uFF0C\u521D\u503C\u8BE5\u7531\u4F7F\u7528\u65B9\u663E\u5F0F\u8D4B\u503C\u3002",
+      ["oop-9"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-serial-version-uid",
+      "mandatory",
+      "coding",
+      "\u5E8F\u5217\u5316\u7C7B\u7684 serialVersionUID \u53EA\u5728\u5B8C\u5168\u4E0D\u517C\u5BB9\u5347\u7EA7\u65F6\u4FEE\u6539\uFF1B\u4EC5\u65B0\u589E\u5B57\u6BB5\u4E0D\u8981\u52A8\u5B83\u3002",
+      ["oop-10"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-constructor-no-logic",
+      "mandatory",
+      "coding",
+      "\u6784\u9020\u65B9\u6CD5\u53EA\u505A\u8D4B\u503C\uFF0C\u4E0D\u5199\u4E1A\u52A1\u903B\u8F91\u3001\u4E0D\u53D1\u8FDC\u7A0B\u8C03\u7528\u3001\u4E0D\u505A IO\uFF1B\u521D\u59CB\u5316\u903B\u8F91\u653E\u5355\u72EC\u7684 init \u65B9\u6CD5\u3002",
+      ["oop-11"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-pojo-tostring",
+      "mandatory",
+      "coding",
+      "POJO \u5FC5\u987B\u5B9E\u73B0 toString\uFF1B\u7EE7\u627F\u7236\u7C7B\u65F6\u628A super.toString() \u4E32\u8FDB\u6765\uFF0C\u5426\u5219\u6392\u67E5\u65E5\u5FD7\u65F6\u770B\u4E0D\u5230\u7236\u7C7B\u5B57\u6BB5\u3002",
+      ["oop-12"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-split-tail-check",
+      "recommended",
+      "coding",
+      "\u7528 split \u7684\u7ED3\u679C\u6309\u7D22\u5F15\u53D6\u503C\u524D\uFF0C\u5148\u5224\u65AD\u672B\u6BB5\u662F\u5426\u4E3A\u7A7A\uFF1A\u7ED3\u5C3E\u5206\u9694\u7B26\u4E0D\u4F1A\u4EA7\u751F\u5C3E\u968F\u7A7A\u5143\u7D20\u3002",
+      ["oop-13"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-accessor-no-logic",
+      "recommended",
+      "coding",
+      "getter/setter \u91CC\u4E0D\u5199\u4E1A\u52A1\u903B\u8F91\uFF1Bsetter \u7528 this.\u6210\u5458 = \u53C2\u6570 \u7684\u5F62\u5F0F\u8D4B\u503C\u3002",
+      ["oop-16"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-clone-caution",
+      "recommended",
+      "coding",
+      "\u614E\u7528 Object.clone\uFF1A\u5B83\u662F\u6D45\u62F7\u8D1D\uFF0C\u4E14\u7ED5\u8FC7\u6784\u9020\u65B9\u6CD5\u3002\u9700\u8981\u590D\u5236\u65F6\u7528\u62F7\u8D1D\u6784\u9020\u6216\u663E\u5F0F\u9010\u5B57\u6BB5\u8D4B\u503C\u3002",
+      ["oop-19"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    rule3(
+      "java-access-modifier-strict",
+      "recommended",
+      "coding",
+      "\u8BBF\u95EE\u63A7\u5236\u4ECE\u4E25\uFF1A\u5DE5\u5177\u7C7B\u6784\u9020\u65B9\u6CD5\u8BBE\u4E3A private\uFF0C\u53EA\u5728\u672C\u7C7B\u7528\u7684\u6210\u5458\u8BBE\u4E3A private\uFF0C\u4E0D\u4E3A\u65B9\u4FBF\u800C\u653E\u5BBD\u53EF\u89C1\u6027\u3002",
+      ["oop-20"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
+    ),
+    // ── 集合补充 ──────────────────────────────────────────────────────────
+    rule3(
+      "java-equals-hashcode-pair",
+      "mandatory",
+      "coding",
+      "\u91CD\u5199 equals \u5C31\u5FC5\u987B\u91CD\u5199 hashCode\uFF1B\u8981\u653E\u8FDB Set \u6216\u4F5C Map \u952E\u7684\u5BF9\u8C61\uFF0C\u4E24\u4E2A\u90FD\u8981\u91CD\u5199\u3002",
+      ["coll-1"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    rule3(
+      "java-toarray-typed",
+      "mandatory",
+      "coding",
+      "\u96C6\u5408\u8F6C\u6570\u7EC4\u7528 toArray(new T[0]) \u6216 toArray(new T[size])\uFF0C\u4E0D\u8981\u7528\u65E0\u53C2 toArray \u518D\u5F3A\u8F6C\u3002",
+      ["coll-4"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    rule3(
+      "java-generic-wildcard",
+      "mandatory",
+      "coding",
+      "<? extends T> \u7684\u96C6\u5408\u4E0D\u80FD\u5199\u5165\uFF0C<? super T> \u7684\u96C6\u5408\u4E0D\u80FD\u8BFB\u53D6\uFF1B\u4F5C\u4E3A\u53C2\u6570\u7C7B\u578B\u65F6\u6309\u300C\u751F\u4EA7\u8005 extends\u3001\u6D88\u8D39\u8005 super\u300D\u9009\u3002",
+      ["coll-6"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    rule3(
+      "java-comparator-contract",
+      "mandatory",
+      "coding",
+      "Comparator \u5FC5\u987B\u6EE1\u8DB3\u81EA\u53CD\u3001\u4F20\u9012\u3001\u4E00\u81F4\u4E09\u6761\u7EA6\u5B9A\uFF1B\u4E0D\u8981\u7528\u300C\u4E24\u4E2A\u503C\u76F8\u51CF\u300D\u5B9E\u73B0\u6BD4\u8F83\uFF0C\u6EA2\u51FA\u4F1A\u7834\u574F\u6392\u5E8F\u3002",
+      ["coll-8"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    rule3(
+      "java-map-null-key",
+      "recommended",
+      "coding",
+      "\u6CE8\u610F\u5404 Map \u5B9E\u73B0\u80FD\u5426\u5B58 null \u952E\u503C\uFF1AConcurrentHashMap \u4E0E Hashtable \u90FD\u4E0D\u5141\u8BB8 null \u952E\u548C null \u503C\u3002",
+      ["coll-11"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    rule3(
+      "java-set-for-dedup",
+      "reference",
+      "coding",
+      "\u53BB\u91CD\u7528 Set\uFF0C\u4E0D\u8981\u7528 List.contains \u9010\u4E2A\u6BD4\u5BF9\u2014\u2014\u540E\u8005\u662F\u5E73\u65B9\u7EA7\u590D\u6742\u5EA6\u3002",
+      ["coll-13"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
+    ),
+    // ── 并发 ──────────────────────────────────────────────────────────────
+    rule3(
+      "java-singleton-thread-safe",
+      "mandatory",
+      "coding",
+      "\u5355\u4F8B\u7684\u5B9E\u4F8B\u5316\u5FC5\u987B\u7EBF\u7A0B\u5B89\u5168\uFF0C\u4E14\u5355\u4F8B\u91CC\u7684\u53EF\u53D8\u72B6\u6001\u4E5F\u8981\u8003\u8651\u5E76\u53D1\u8BBF\u95EE\u3002",
+      ["concur-1"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-thread-naming",
+      "mandatory",
+      "coding",
+      "\u521B\u5EFA\u7EBF\u7A0B\u6216\u7EBF\u7A0B\u6C60\u5FC5\u987B\u6307\u5B9A\u6709\u610F\u4E49\u7684\u7EBF\u7A0B\u540D\uFF08\u542B\u4E1A\u52A1\u6807\u8BC6\uFF09\uFF0C\u5426\u5219\u51FA\u95EE\u9898\u65F6\u65E0\u6CD5\u4ECE\u7EBF\u7A0B\u6808\u5B9A\u4F4D\u3002",
+      ["concur-2"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-no-raw-thread",
+      "mandatory",
+      "coding",
+      "\u4E0D\u5F97\u663E\u5F0F new Thread \u6216 new Thread(...).start()\uFF0C\u7EBF\u7A0B\u7EDF\u4E00\u7531\u7EBF\u7A0B\u6C60\u63D0\u4F9B\u3002",
+      ["concur-3"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-no-executors",
+      "mandatory",
+      "coding",
+      "\u7EBF\u7A0B\u6C60\u7528 new ThreadPoolExecutor(...) \u663E\u5F0F\u6784\u9020\u5E76\u6307\u5B9A\u961F\u5217\u4E0E\u62D2\u7EDD\u7B56\u7565\uFF0C\u4E0D\u7528 Executors \u7684\u5DE5\u5382\u65B9\u6CD5\u2014\u2014\u90A3\u4E9B\u65B9\u6CD5\u7684\u961F\u5217\u65E0\u754C\uFF0C\u4F1A OOM\u3002",
+      ["concur-4"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-simpledateformat-thread",
+      "mandatory",
+      "coding",
+      "SimpleDateFormat \u4E0D\u8981\u4F5C\u4E3A static \u5B57\u6BB5\u5171\u4EAB\uFF1B\u5FC5\u987B\u5171\u4EAB\u65F6\u52A0\u9501\uFF0C\u6216\u6539\u7528 DateTimeFormatter\u3002",
+      ["concur-5"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-lost-update",
+      "mandatory",
+      "coding",
+      "\u5E76\u53D1\u66F4\u65B0\u540C\u4E00\u884C\u8BB0\u5F55\u8981\u9632\u4E22\u5931\u66F4\u65B0\uFF1A\u5E94\u7528\u5C42\u52A0\u9501\u3001\u7F13\u5B58\u52A0\u9501\uFF0C\u6216\u6570\u636E\u5E93\u4E50\u89C2\u9501\uFF08\u7528 version \u4F5C\u66F4\u65B0\u6761\u4EF6\uFF09\u3002",
+      ["concur-8"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-no-timer",
+      "mandatory",
+      "coding",
+      "\u591A\u4EFB\u52A1\u5B9A\u65F6\u4E0D\u8981\u7528 Timer\uFF1A\u4E00\u4E2A\u4EFB\u52A1\u629B\u5F02\u5E38\u4F1A\u8BA9\u5176\u4F59\u4EFB\u52A1\u5168\u90E8\u7EC8\u6B62\u3002\u6539\u7528 ScheduledExecutorService\u3002",
+      ["concur-9"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-countdown-latch-finally",
+      "recommended",
+      "coding",
+      "CountDownLatch \u7684 countDown() \u653E\u8FDB finally\uFF0C\u5426\u5219\u4EFB\u52A1\u629B\u5F02\u5E38\u4F1A\u8BA9\u7B49\u5F85\u65B9\u4E00\u76F4\u6302\u5230\u8D85\u65F6\u3002",
+      ["concur-10"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-random-shared",
+      "recommended",
+      "coding",
+      "Random \u5B9E\u4F8B\u4E0D\u8981\u8DE8\u7EBF\u7A0B\u5171\u4EAB\uFF0C\u4E89\u7528\u540C\u4E00\u4E2A seed \u4F1A\u663E\u8457\u964D\u901F\uFF1B\u5E76\u53D1\u573A\u666F\u7528 ThreadLocalRandom\u3002",
+      ["concur-11"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-dcl-volatile",
+      "recommended",
+      "coding",
+      "\u53CC\u91CD\u68C0\u67E5\u9501\u61D2\u52A0\u8F7D\uFF0C\u5B9E\u4F8B\u5B57\u6BB5\u5FC5\u987B\u52A0 volatile\uFF0C\u5426\u5219\u53EF\u80FD\u62FF\u5230\u672A\u521D\u59CB\u5316\u5B8C\u6210\u7684\u5BF9\u8C61\u3002",
+      ["concur-12"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-hashmap-shared-mutation",
+      "reference",
+      "coding",
+      "\u5171\u4EAB\u4E14\u4F1A\u88AB\u5E76\u53D1\u5199\u7684\u573A\u666F\u4E0D\u8981\u7528 HashMap\uFF08\u6269\u5BB9\u53EF\u80FD\u5F62\u6210\u6B7B\u94FE\uFF09\uFF0C\u6539\u7528 ConcurrentHashMap\u3002",
+      ["concur-14"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    rule3(
+      "java-threadlocal-static",
+      "reference",
+      "coding",
+      "ThreadLocal \u7528 static final \u4FEE\u9970\uFF0C\u907F\u514D\u6BCF\u4E2A\u5B9E\u4F8B\u5404\u6301\u4E00\u4EFD\u9020\u6210\u6CC4\u6F0F\u3002",
+      ["concur-15"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E76\u53D1\u5904\u7406"
+    ),
+    // ── 控制语句 ──────────────────────────────────────────────────────────
+    rule3(
+      "java-switch-default",
+      "mandatory",
+      "coding",
+      "switch \u6BCF\u4E2A case \u90FD\u8981\u4EE5 break/return \u7ED3\u675F\uFF0C\u9700\u8981\u8D2F\u7A7F\u65F6\u5FC5\u987B\u6CE8\u91CA\u8BF4\u660E\uFF1B\u5FC5\u987B\u6709 default \u4E14\u653E\u5728\u6700\u540E\uFF0C\u54EA\u6015\u91CC\u9762\u662F\u7A7A\u7684\u3002",
+      ["ctrl-1"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u63A7\u5236\u8BED\u53E5"
+    ),
+    rule3(
+      "java-mandatory-braces",
+      "mandatory",
+      "coding",
+      "if/else/for/while/do \u4E00\u5F8B\u5E26\u5927\u62EC\u53F7\uFF0C\u5373\u4F7F\u53EA\u6709\u4E00\u884C\u3002\u7701\u7565\u5927\u62EC\u53F7\u662F\u5386\u53F2\u4E0A\u4E00\u7C7B\u8457\u540D\u7EBF\u4E0A\u4E8B\u6545\u7684\u6210\u56E0\u3002",
+      ["ctrl-2"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u63A7\u5236\u8BED\u53E5"
+    ),
+    rule3(
+      "java-early-return",
+      "recommended",
+      "coding",
+      "\u5F02\u5E38\u5206\u652F\u7528\u65E9\u8FD4\u56DE\u5904\u7406\uFF0C\u628A\u4E3B\u6D41\u7A0B\u7559\u5728\u6700\u5916\u5C42\uFF0C\u4E0D\u8981\u7528\u529B\u5C42\u5C42\u5D4C\u5957\u7684 if-else \u8868\u8FBE\u3002",
+      ["ctrl-3"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u63A7\u5236\u8BED\u53E5"
+    ),
+    rule3(
+      "java-loop-hoist",
+      "recommended",
+      "coding",
+      "\u5FAA\u73AF\u4F53\u5185\u4E0D\u505A\u53EF\u5916\u63D0\u7684\u64CD\u4F5C\uFF1A\u5BF9\u8C61\u521B\u5EFA\u3001\u8FDE\u63A5\u83B7\u53D6\u3001\u4E0D\u53D8\u7684\u5224\u65AD\u90FD\u63D0\u5230\u5FAA\u73AF\u5916\u3002",
+      ["ctrl-5"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u63A7\u5236\u8BED\u53E5"
+    ),
+    // ── 注释 ──────────────────────────────────────────────────────────────
+    rule3(
+      "java-javadoc-required",
+      "mandatory",
+      "coding",
+      "\u7C7B\u3001\u7C7B\u5C5E\u6027\u3001\u7C7B\u65B9\u6CD5\u4EE5\u53CA\u6240\u6709\u62BD\u8C61\u65B9\u6CD5\u4E0E\u63A5\u53E3\u65B9\u6CD5\uFF0C\u5FC5\u987B\u7528 /** */ \u5F62\u5F0F\u7684 Javadoc\uFF1B\u63A5\u53E3\u65B9\u6CD5\u8FD8\u8981\u8BF4\u660E\u5B83\u505A\u4EC0\u4E48\uFF0C\u800C\u4E0D\u53EA\u662F\u5199\u53C2\u6570\u3002",
+      ["comment-1", "comment-2"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u6CE8\u91CA\u89C4\u7EA6"
+    ),
+    rule3(
+      "java-class-author-date",
+      "mandatory",
+      "coding",
+      "\u7C7B\u6CE8\u91CA\u91CC\u5FC5\u987B\u5199\u521B\u5EFA\u8005\u4E0E\u521B\u5EFA\u65E5\u671F\uFF0C\u65B9\u4FBF\u51FA\u95EE\u9898\u65F6\u627E\u5230\u6700\u65E9\u5199\u5B83\u7684\u4EBA\u3002",
+      ["comment-3"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u6CE8\u91CA\u89C4\u7EA6"
+    ),
+    rule3(
+      "java-enum-field-comment",
+      "mandatory",
+      "coding",
+      "\u679A\u4E3E\u7684\u6BCF\u4E2A\u6210\u5458\u90FD\u8981\u5199\u6CE8\u91CA\u8BF4\u660E\u5B83\u4EE3\u8868\u4EC0\u4E48\uFF0C\u5426\u5219\u8BFB\u4EE3\u7801\u7684\u4EBA\u53EA\u80FD\u731C\u3002",
+      ["comment-5"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u6CE8\u91CA\u89C4\u7EA6"
+    ),
+    rule3(
+      "java-no-commented-code",
+      "reference",
+      "coding",
+      "\u4E0D\u8981\u7559\u5927\u6BB5\u88AB\u6CE8\u91CA\u6389\u7684\u4EE3\u7801\u3002\u786E\u5B9E\u6709\u7528\u5C31\u5728\u4E0A\u65B9\u8BF4\u660E\u539F\u56E0\uFF0C\u6CA1\u7528\u5C31\u5220\u6389\u2014\u2014\u5B83\u53EA\u4F1A\u8BA9\u540E\u6765\u7684\u4EBA\u4E0D\u6562\u52A8\u3002",
+      ["comment-8"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u6CE8\u91CA\u89C4\u7EA6"
+    ),
+    rule3(
+      "java-todo-format",
+      "reference",
+      "coding",
+      "TODO/FIXME \u5FC5\u987B\u5199\u660E\u6807\u8BB0\u4EBA\u4E0E\u6807\u8BB0\u65F6\u95F4\uFF1B\u65E0\u4E3B\u7684 TODO \u6C38\u8FDC\u4E0D\u4F1A\u88AB\u5904\u7406\u3002",
+      ["comment-11"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u6CE8\u91CA\u89C4\u7EA6"
+    ),
+    // ── 其它 ──────────────────────────────────────────────────────────────
+    rule3(
+      "java-regex-precompile",
+      "mandatory",
+      "coding",
+      "\u6B63\u5219\u8868\u8FBE\u5F0F\u7F16\u8BD1\u6210 static final Pattern \u590D\u7528\uFF0C\u4E0D\u8981\u5728\u9AD8\u9891\u8DEF\u5F84\u91CC\u53CD\u590D Pattern.compile\u3002",
+      ["misc-1"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5176\u5B83"
+    ),
+    rule3(
+      "java-velocity-escape",
+      "mandatory",
+      "coding",
+      "\u6A21\u677F\u91CC\u8F93\u51FA\u540E\u7AEF\u53D8\u91CF\u7528 $!{var}\uFF08\u5E26\u611F\u53F9\u53F7\uFF09\uFF0C\u7F3A\u503C\u65F6\u624D\u4E0D\u4F1A\u628A\u8868\u8FBE\u5F0F\u539F\u6837\u6253\u5728\u9875\u9762\u4E0A\u3002",
+      ["misc-3"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5176\u5B83"
+    ),
+    rule3(
+      "java-random-int",
+      "mandatory",
+      "coding",
+      "\u53D6\u6574\u6570\u968F\u673A\u6570\u7528 Random.nextInt(bound)\uFF0C\u4E0D\u8981\u628A Math.random() \u4E58\u500D\u6570\u518D\u53D6\u6574\u2014\u2014\u90A3\u4F1A\u5F15\u5165\u5206\u5E03\u504F\u5DEE\u548C\u8FB9\u754C\u9519\u8BEF\u3002",
+      ["misc-4"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5176\u5B83"
+    ),
+    rule3(
+      "java-current-time-millis",
+      "mandatory",
+      "coding",
+      "\u53D6\u5F53\u524D\u6BEB\u79D2\u7528 System.currentTimeMillis()\uFF0C\u4E0D\u8981 new Date().getTime() \u591A\u9020\u4E00\u4E2A\u5BF9\u8C61\u3002",
+      ["misc-5"],
+      "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5176\u5B83"
+    )
+  ]
+};
+
+// src/core/reviewers/rules/java-db.ts
+var BASIS_PREFIX3 = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
+var SOURCE5 = {
+  name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
+  url: "https://github.com/alibaba/p3c",
+  license: "own",
+  modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
+};
+var SQL_ONLY = ["sql"];
+var SQL_ANYWHERE = ["sql", "xml", "java"];
+function rule4(id, level, instruction, clause, languages, basis) {
+  return {
+    id,
+    level,
+    dimension: "database",
+    title: instruction.slice(0, 30),
+    instruction,
+    languages,
+    clauses: clause,
+    source: { ...SOURCE5, basis: `${BASIS_PREFIX3} ${basis}` }
+  };
+}
+var JAVA_DB_RULES = {
+  entries: [
+    // ── 建表 ──────────────────────────────────────────────────────────────
+    rule4(
+      "java-db-name-lowercase",
+      "mandatory",
+      "\u8868\u540D\u4E0E\u5B57\u6BB5\u540D\u53EA\u7528\u5C0F\u5199\u5B57\u6BCD\u3001\u6570\u5B57\u548C\u4E0B\u5212\u7EBF\uFF1A\u4E0D\u4EE5\u6570\u5B57\u5F00\u5934\uFF0C\u4E0D\u51FA\u73B0\u8FDE\u7EED\u4E24\u4E2A\u4E0B\u5212\u7EBF\uFF0C\u4E0D\u7528\u590D\u6570\u8868\u540D\u3002",
+      ["db-table-2", "db-table-3"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-no-reserved-word",
+      "mandatory",
+      "\u4E0D\u5F97\u7528 SQL \u4FDD\u7559\u5B57\u505A\u8868\u540D\u6216\u5B57\u6BB5\u540D\uFF08desc\u3001order\u3001range\u3001match\u3001group\u3001key \u7B49\uFF09\u3002",
+      ["db-table-4"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-char-for-fixed",
+      "mandatory",
+      "\u5B58\u50A8\u957F\u5EA6\u51E0\u4E4E\u56FA\u5B9A\u7684\u5B57\u7B26\u4E32\u7528 char \u800C\u4E0D\u662F varchar\u3002",
+      ["db-table-7"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-column-comment",
+      "recommended",
+      "\u6BCF\u4E2A\u5B57\u6BB5\u90FD\u8981\u6709 COMMENT\uFF0C\u8BF4\u660E\u5B83\u5B58\u4EC0\u4E48\u3001\u53D6\u503C\u8303\u56F4\uFF1B\u5B57\u6BB5\u542B\u4E49\u53D8\u5316\u65F6\u540C\u6B65\u6539\u6CE8\u91CA\u3002",
+      ["db-table-12"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
+    ),
+    // ── 索引 ──────────────────────────────────────────────────────────────
+    rule4(
+      "java-db-unique-index",
+      "mandatory",
+      "\u4E1A\u52A1\u4E0A\u5177\u6709\u552F\u4E00\u6027\u7684\u5B57\u6BB5\uFF08\u542B\u7EC4\u5408\uFF09\u5FC5\u987B\u5EFA\u552F\u4E00\u7D22\u5F15\uFF0C\u4E0D\u8981\u53EA\u9760\u5E94\u7528\u5C42\u5148\u67E5\u540E\u63D2\u3002",
+      ["db-index-1"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-join-limit",
+      "mandatory",
+      "\u4E00\u6761\u67E5\u8BE2\u6700\u591A\u5173\u8054\u4E09\u5F20\u8868\uFF1Bjoin \u7684\u5B57\u6BB5\u7C7B\u578B\u5FC5\u987B\u5B8C\u5168\u4E00\u81F4\uFF0C\u4E14\u88AB\u5173\u8054\u5B57\u6BB5\u8981\u6709\u7D22\u5F15\u3002",
+      ["db-index-2"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-index-length",
+      "mandatory",
+      "\u7ED9 varchar \u5B57\u6BB5\u5EFA\u7D22\u5F15\u5FC5\u987B\u6307\u5B9A\u524D\u7F00\u957F\u5EA6\uFF0C\u4E0D\u8981\u5BF9\u5168\u5B57\u6BB5\u5EFA\u3002",
+      ["db-index-3"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-no-leading-wildcard",
+      "mandatory",
+      "\u7981\u6B62 LIKE \u4EE5 % \u5F00\u5934\uFF08\u5DE6\u6A21\u7CCA\u6216\u5168\u6A21\u7CCA\uFF09\uFF0C\u7D22\u5F15\u4F1A\u5931\u6548\uFF1B\u8FD9\u7C7B\u68C0\u7D22\u5E94\u4EA4\u7ED9\u641C\u7D22\u5F15\u64CE\u3002",
+      ["db-index-4"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-orderby-index",
+      "recommended",
+      "order by \u7684\u5B57\u6BB5\u987A\u5E8F\u8981\u4E0E\u7EC4\u5408\u7D22\u5F15\u4E00\u81F4\uFF0C\u5426\u5219\u4F1A\u8D70 file_sort\u3002",
+      ["db-index-5"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    rule4(
+      "java-db-implicit-cast",
+      "recommended",
+      "\u67E5\u8BE2\u6761\u4EF6\u91CC\u7684\u5B57\u9762\u91CF\u7C7B\u578B\u8981\u4E0E\u5B57\u6BB5\u7C7B\u578B\u4E00\u81F4\uFF0C\u907F\u514D\u9690\u5F0F\u8F6C\u6362\u5BFC\u81F4\u7D22\u5F15\u5931\u6548\uFF08\u5982\u5B57\u7B26\u4E32\u5B57\u6BB5\u4F20\u6570\u5B57\uFF09\u3002",
+      ["db-index-10"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
+    ),
+    // ── SQL 语句 ──────────────────────────────────────────────────────────
+    rule4(
+      "java-sql-count-star",
+      "mandatory",
+      "\u7EDF\u8BA1\u884C\u6570\u7528 count(*)\uFF0C\u4E0D\u8981\u7528 count(\u5217\u540D) \u6216 count(\u5E38\u91CF)\u3002",
+      ["db-sql-1"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-sql-sum-null",
+      "mandatory",
+      "sum() \u5728\u5168\u5217\u4E3A NULL \u65F6\u8FD4\u56DE NULL\uFF0C\u63A5\u6536\u8FD4\u56DE\u503C\u65F6\u8981\u9632\u81EA\u52A8\u62C6\u7BB1\u7684\u7A7A\u6307\u9488\u3002",
+      ["db-sql-3"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-sql-null-check",
+      "mandatory",
+      "\u5224\u65AD\u5B57\u6BB5\u662F\u5426\u4E3A NULL \u7528 ISNULL() \u6216 IS NULL\uFF0C\u4E0D\u8981\u7528 = NULL\u3002",
+      ["db-sql-4"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-sql-pagination-early-return",
+      "mandatory",
+      "\u5206\u9875\u67E5\u8BE2\u5148 count\uFF0C\u4E3A 0 \u65F6\u76F4\u63A5\u8FD4\u56DE\u7A7A\u7ED3\u679C\uFF0C\u4E0D\u8981\u518D\u6267\u884C\u540E\u7EED\u7684\u5217\u8868\u67E5\u8BE2\u3002",
+      ["db-sql-5"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-db-no-foreign-key",
+      "mandatory",
+      "\u4E0D\u4F7F\u7528\u5916\u952E\u4E0E\u7EA7\u8054\u66F4\u65B0/\u5220\u9664\uFF0C\u5173\u8054\u5173\u7CFB\u5728\u5E94\u7528\u5C42\u7EF4\u62A4\u3002",
+      ["db-sql-6"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-db-no-procedure",
+      "mandatory",
+      "\u4E0D\u4F7F\u7528\u5B58\u50A8\u8FC7\u7A0B\u4E0E\u89E6\u53D1\u5668\uFF0C\u903B\u8F91\u5199\u5728\u5E94\u7528\u5C42\u3002",
+      ["db-sql-7"],
+      SQL_ONLY,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-db-select-before-write",
+      "mandatory",
+      "\u6570\u636E\u8BA2\u6B63\uFF1A\u5148 select \u786E\u8BA4\u5F71\u54CD\u8303\u56F4\uFF0C\u518D\u6267\u884C update/delete\uFF1B\u6279\u91CF\u5220\u9664\u5FC5\u987B\u6709\u660E\u786E\u7684 where \u6761\u4EF6\u3002",
+      ["db-sql-8"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-sql-in-limit",
+      "recommended",
+      "in \u540E\u9762\u7684\u96C6\u5408\u5143\u7D20\u63A7\u5236\u5728 1000 \u4E2A\u4EE5\u5185\uFF1B\u66F4\u591A\u65F6\u6539\u9020\u4E3A join \u6216\u5206\u6279\u3002",
+      ["db-sql-9"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    rule4(
+      "java-db-no-truncate",
+      "reference",
+      "\u4E1A\u52A1\u4EE3\u7801\u91CC\u4E0D\u4F7F\u7528 TRUNCATE TABLE\uFF1A\u5B83\u4E0D\u8FDB\u4E8B\u52A1\u3001\u4E0D\u89E6\u53D1\u89E6\u53D1\u5668\uFF0C\u8BEF\u7528\u65E0\u6CD5\u56DE\u6EDA\u3002",
+      ["db-sql-11"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7SQL \u8BED\u53E5"
+    ),
+    // ── ORM ───────────────────────────────────────────────────────────────
+    rule4(
+      "java-sql-no-select-star",
+      "mandatory",
+      "\u67E5\u8BE2\u5FC5\u987B\u5199\u660E\u5B57\u6BB5\u5217\u8868\uFF0C\u4E0D\u5F97\u4F7F\u7528 select *\u3002",
+      ["db-orm-1"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-orm-boolean-mapping",
+      "mandatory",
+      "\u6570\u636E\u5E93\u662F\u662F\u4E0E\u5426\u8BED\u4E49\u7684\u5B57\u6BB5\u7528 is_xxx\uFF0CPOJO \u91CC\u5BF9\u5E94\u5C5E\u6027\u53BB\u6389 is \u524D\u7F00\uFF0C\u5728 resultMap \u4E2D\u663E\u5F0F\u6620\u5C04\u3002",
+      ["db-orm-2"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-orm-resultmap",
+      "mandatory",
+      "\u4E0D\u8981\u7528 resultClass/resultType \u8BA9\u5B83\u81EA\u52A8\u731C\u5B57\u6BB5\u6620\u5C04\uFF0C\u663E\u5F0F\u5199 resultMap\uFF1B\u6BCF\u5F20\u8868\u5BF9\u5E94\u4E00\u4E2A\u660E\u786E\u7684\u6620\u5C04\u3002",
+      ["db-orm-3"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-mybatis-no-dollar",
+      "mandatory",
+      "MyBatis \u53C2\u6570\u4E00\u5F8B\u7528 #{}\uFF0C\u7981\u6B62 ${}\u2014\u2014\u540E\u8005\u662F\u5B57\u7B26\u4E32\u62FC\u63A5\uFF0C\u76F4\u63A5\u6784\u6210 SQL \u6CE8\u5165\u3002",
+      ["db-orm-4"],
+      ["xml", "java"],
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-orm-no-map-result",
+      "mandatory",
+      "\u67E5\u8BE2\u7ED3\u679C\u5FC5\u987B\u6620\u5C04\u5230\u660E\u786E\u7684\u9886\u57DF\u5BF9\u8C61\uFF0C\u4E0D\u5141\u8BB8\u7528 HashMap/Hashtable \u63A5\u6536\u3002",
+      ["db-orm-6"],
+      ["xml", "java"],
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-db-gmt-modified",
+      "mandatory",
+      "update \u8BED\u53E5\u5FC5\u987B\u540C\u65F6\u66F4\u65B0 gmt_modified \u4E3A\u5F53\u524D\u65F6\u95F4\u3002",
+      ["db-orm-7"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-db-narrow-update",
+      "recommended",
+      "\u4E0D\u8981\u5199\u300C\u4F20\u5165\u6574\u4E2A POJO \u5C31\u5168\u5B57\u6BB5\u66F4\u65B0\u300D\u7684\u63A5\u53E3\uFF0C\u53EA\u66F4\u65B0\u8C03\u7528\u65B9\u660E\u786E\u8981\u6539\u7684\u5B57\u6BB5\u3002",
+      ["db-orm-8"],
+      SQL_ANYWHERE,
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    ),
+    rule4(
+      "java-transaction-scope",
+      "reference",
+      "@Transactional \u53EA\u52A0\u5728\u771F\u6B63\u9700\u8981\u539F\u5B50\u6027\u7684\u8FB9\u754C\u4E0A\uFF1B\u5B83\u4F1A\u5F71\u54CD\u5E76\u53D1\u80FD\u529B\uFF0C\u4E14\u52A0\u4E86\u4E8B\u52A1\u5C31\u8981\u60F3\u6E05\u7F13\u5B58\u3001\u6D88\u606F\u3001\u68C0\u7D22\u7684\u56DE\u6EDA\u3002",
+      ["db-orm-9"],
+      ["java"],
+      "MySQL \u6570\u636E\u5E93\xB7ORM \u6620\u5C04"
+    )
+  ]
+};
+
+// src/core/reviewers/rules/java-format.ts
+var BASIS_PREFIX4 = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
+var SOURCE6 = {
+  name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
+  url: "https://github.com/alibaba/p3c",
+  license: "own",
+  modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
+};
+function rule5(id, level, instruction, clause) {
+  return {
+    id,
+    level,
+    dimension: "format",
+    title: instruction.slice(0, 30),
+    instruction,
+    languages: ["java"],
+    clauses: clause,
+    source: { ...SOURCE6, basis: `${BASIS_PREFIX4} \u7F16\u7A0B\u89C4\u7EA6\xB7\u4EE3\u7801\u683C\u5F0F` }
+  };
+}
+var JAVA_FORMAT_RULES = {
+  entries: [
+    rule5(
+      "java-format-brace",
+      "mandatory",
+      "\u7A7A\u4EE3\u7801\u5757\u5199\u6210 {}\uFF1B\u975E\u7A7A\u65F6\u5DE6\u5927\u62EC\u53F7\u4E0D\u6362\u884C\u3001\u5927\u62EC\u53F7\u540E\u6362\u884C\u3001\u53F3\u5927\u62EC\u53F7\u524D\u6362\u884C\uFF1Bcatch/finally/else \u524D\u4E0D\u6362\u884C\u3002",
+      ["format-1"]
+    ),
+    rule5(
+      "java-format-paren-space",
+      "mandatory",
+      "\u5C0F\u62EC\u53F7\u5185\u4FA7\u4E0D\u7559\u7A7A\u683C\uFF1A\u5199 foo(a, b)\uFF0C\u4E0D\u5199 foo( a, b )\u3002",
+      ["format-2"]
+    ),
+    rule5(
+      "java-format-keyword-space",
+      "mandatory",
+      "if/for/while/switch/do \u7B49\u5173\u952E\u5B57\u4E0E\u5DE6\u62EC\u53F7\u4E4B\u95F4\u5FC5\u987B\u6709\u4E00\u4E2A\u7A7A\u683C\u3002",
+      ["format-3"]
+    ),
+    rule5("java-format-operator-space", "mandatory", "\u4E8C\u76EE\u4E0E\u4E09\u76EE\u8FD0\u7B97\u7B26\u4E24\u4FA7\u5404\u7559\u4E00\u4E2A\u7A7A\u683C\u3002", [
+      "format-4"
+    ]),
+    rule5("java-format-indent", "mandatory", "\u7528 4 \u4E2A\u7A7A\u683C\u7F29\u8FDB\uFF0C\u4E0D\u7528 tab\u3002", ["format-5"]),
+    rule5(
+      "java-format-comment-space",
+      "mandatory",
+      "\u53CC\u659C\u7EBF\u4E0E\u6CE8\u91CA\u6B63\u6587\u4E4B\u95F4\u7559\u4E14\u53EA\u7559\u4E00\u4E2A\u7A7A\u683C\uFF1B\u65B9\u6CD5\u5185\u591A\u884C\u6CE8\u91CA\u4E0E\u4EE3\u7801\u5DE6\u5BF9\u9F50\u3002",
+      ["format-6", "comment-4"]
+    ),
+    rule5(
+      "java-format-line-length",
+      "mandatory",
+      "\u5355\u884C\u4E0D\u8D85\u8FC7 120 \u5B57\u7B26\uFF1B\u6362\u884C\u65F6\u7B2C\u4E8C\u884C\u8D77\u7F29\u8FDB 4 \u4E2A\u7A7A\u683C\uFF0C\u8FD0\u7B97\u7B26\u4E0E\u4E0B\u4E00\u884C\u540C\u884C\u9996\u3002",
+      ["format-7"]
+    ),
+    rule5("java-format-comma-space", "mandatory", "\u65B9\u6CD5\u53C2\u6570\u5728\u5B9A\u4E49\u4E0E\u8C03\u7528\u65F6\uFF0C\u9017\u53F7\u540E\u52A0\u4E00\u4E2A\u7A7A\u683C\u3002", [
+      "format-8"
+    ]),
+    rule5("java-format-encoding", "mandatory", "\u6E90\u6587\u4EF6\u7528 UTF-8 \u7F16\u7801\u3001LF \u6362\u884C\u7B26\uFF0C\u4E0D\u8981\u6DF7\u5165 CRLF\u3002", [
+      "format-9"
+    ]),
+    rule5(
+      "java-format-no-align",
+      "recommended",
+      "\u4E0D\u8981\u7528\u591A\u4F59\u7A7A\u683C\u628A\u67D0\u4E00\u884C\u4E0E\u4E0A\u4E00\u884C\u5BF9\u9F50\uFF0C\u90A3\u4F1A\u8BA9\u540E\u7EED\u6539\u52A8\u4EA7\u751F\u65E0\u610F\u4E49\u7684 diff\u3002",
+      ["format-10"]
+    ),
+    rule5(
+      "java-format-blank-line",
+      "recommended",
+      "\u4E0D\u540C\u8BED\u4E49\u7684\u8BED\u53E5\u7EC4\u4E4B\u95F4\u63D2\u5165\u4E00\u4E2A\u7A7A\u884C\uFF1B\u540C\u4E00\u903B\u8F91\u5185\u4E0D\u7559\u7A7A\u884C\u3002",
+      ["format-11"]
+    )
+  ]
+};
+
+// src/core/reviewers/rules/java-quality.ts
+var BASIS_PREFIX5 = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
+var SOURCE7 = {
+  name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
+  url: "https://github.com/alibaba/p3c",
+  license: "own",
+  modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
+};
+function rule6(id, level, dimension, instruction, clause, basis) {
+  return {
+    id,
+    level,
+    dimension,
+    title: instruction.slice(0, 30),
+    instruction,
+    languages: ["java"],
+    clauses: clause,
+    source: { ...SOURCE7, basis: `${BASIS_PREFIX5} ${basis}` }
+  };
+}
+var JAVA_QUALITY_RULES = {
+  entries: [
+    // ── 异常补充 ──────────────────────────────────────────────────────────
+    rule6(
+      "java-precheck-not-catch",
+      "mandatory",
+      "exception-log",
+      "\u80FD\u7528\u524D\u7F6E\u68C0\u67E5\u89C4\u907F\u7684\u8FD0\u884C\u65F6\u5F02\u5E38\uFF08\u7A7A\u6307\u9488\u3001\u6570\u7EC4\u8D8A\u754C\u3001\u7C7B\u578B\u8F6C\u6362\uFF09\u5C31\u7528\u68C0\u67E5\u89C4\u907F\uFF0C\u4E0D\u8981\u9760 catch \u515C\u4F4F\u3002",
+      ["exc-1"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-transaction-rollback",
+      "mandatory",
+      "exception-log",
+      "\u4E8B\u52A1\u65B9\u6CD5\u91CC catch \u4F4F\u5F02\u5E38\u540E\u5982\u679C\u4ECD\u9700\u56DE\u6EDA\uFF0C\u5FC5\u987B\u663E\u5F0F\u6807\u8BB0\u56DE\u6EDA\uFF08rollbackFor \u6216\u624B\u52A8\u56DE\u6EDA\uFF09\uFF0C\u5426\u5219\u4E8B\u52A1\u4F1A\u7167\u5E38\u63D0\u4EA4\u3002",
+      ["exc-5"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-finally-close-resource",
+      "mandatory",
+      "exception-log",
+      "\u8D44\u6E90\u5FC5\u987B\u5728 finally \u4E2D\u5173\u95ED\uFF08\u6216\u7528 try-with-resources\uFF09\uFF0C\u4E14\u5173\u95ED\u52A8\u4F5C\u672C\u8EAB\u4E5F\u8981\u9632\u5F02\u5E38\u3002",
+      ["exc-6"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-catch-type-match",
+      "mandatory",
+      "exception-log",
+      "\u6355\u83B7\u7684\u5F02\u5E38\u7C7B\u578B\u5FC5\u987B\u4E0E\u53EF\u80FD\u629B\u51FA\u7684\u7C7B\u578B\u5339\u914D\uFF0C\u6216\u8005\u662F\u5B83\u7684\u7236\u7C7B\uFF1B\u6355\u4E00\u4E2A\u4ECE\u4E0D\u629B\u51FA\u7684\u7C7B\u578B\u8BF4\u660E\u5224\u65AD\u9519\u4E86\u3002",
+      ["exc-8"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-null-return-doc",
+      "recommended",
+      "exception-log",
+      "\u65B9\u6CD5\u53EF\u80FD\u8FD4\u56DE null \u65F6\u5FC5\u987B\u5728 Javadoc \u91CC\u5199\u660E\uFF0C\u8BA9\u8C03\u7528\u65B9\u77E5\u9053\u8981\u505A\u975E\u7A7A\u5224\u65AD\u3002",
+      ["exc-9"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-unboxing-npe",
+      "recommended",
+      "exception-log",
+      "\u57FA\u672C\u7C7B\u578B\u63A5\u6536\u5305\u88C5\u7C7B\u578B\u7684\u8FD4\u56DE\u503C\u65F6\u4F1A\u81EA\u52A8\u62C6\u7BB1\uFF0C\u503C\u4E3A null \u5C31\u629B\u7A7A\u6307\u9488\uFF1B\u63A5\u53E3\u8FD4\u56DE\u503C\u3001\u6570\u636E\u5E93\u67E5\u8BE2\u7ED3\u679C\u5C24\u5176\u8981\u6CE8\u610F\u3002",
+      ["exc-10"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    rule6(
+      "java-specific-exception",
+      "recommended",
+      "exception-log",
+      "\u629B\u5F02\u5E38\u8981\u7528\u6709\u4E1A\u52A1\u542B\u4E49\u7684\u81EA\u5B9A\u4E49\u5F02\u5E38\uFF1B\u4E0D\u8981\u76F4\u63A5 new RuntimeException()\uFF0C\u66F4\u4E0D\u8981\u629B Exception \u6216 Throwable\u3002",
+      ["exc-11"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
+    ),
+    // ── 日志补充 ──────────────────────────────────────────────────────────
+    rule6(
+      "java-log-slf4j-facade",
+      "mandatory",
+      "exception-log",
+      "\u53EA\u7528 SLF4J \u7684 API\uFF08LoggerFactory.getLogger\uFF09\uFF0C\u4E0D\u76F4\u63A5\u4F9D\u8D56 Log4j/Logback \u7684\u5B9E\u73B0\u7C7B\u2014\u2014\u6362\u5B9E\u73B0\u65F6\u624D\u4E0D\u7528\u6539\u4EE3\u7801\u3002",
+      ["log-1"],
+      "\u5F02\u5E38\u65E5\u5FD7\xB7\u65E5\u5FD7\u89C4\u7EA6"
+    ),
+    // ── 单元测试补充 ──────────────────────────────────────────────────────
+    rule6(
+      "java-test-no-print",
+      "mandatory",
+      "unit-test",
+      "\u6D4B\u8BD5\u7ED3\u679C\u5FC5\u987B\u9760\u65AD\u8A00\u8868\u8FBE\uFF0C\u4E0D\u5141\u8BB8\u7528 System.out \u6253\u5370\u540E\u4EBA\u5DE5\u6BD4\u5BF9\u2014\u2014\u90A3\u6837\u7684\u6D4B\u8BD5\u65E0\u6CD5\u81EA\u52A8\u5316\u6267\u884C\u3002",
+      ["test-2"],
+      "\u5355\u5143\u6D4B\u8BD5\xB7AIR \u539F\u5219"
+    ),
+    rule6(
+      "java-test-independent",
+      "mandatory",
+      "unit-test",
+      "\u7528\u4F8B\u4E4B\u95F4\u4E0D\u5F97\u76F8\u4E92\u8C03\u7528\uFF0C\u4E5F\u4E0D\u5F97\u4F9D\u8D56\u6267\u884C\u987A\u5E8F\uFF1B\u6BCF\u4E2A\u7528\u4F8B\u81EA\u5DF1\u51C6\u5907\u6570\u636E\u3001\u81EA\u5DF1\u6536\u5C3E\u3002",
+      ["test-3"],
+      "\u5355\u5143\u6D4B\u8BD5\xB7AIR \u539F\u5219"
+    ),
+    rule6(
+      "java-test-no-external",
+      "mandatory",
+      "unit-test",
+      "\u7528\u4F8B\u8981\u80FD\u91CD\u590D\u6267\u884C\uFF1A\u4E0D\u4F9D\u8D56\u56FA\u5B9A\u65F6\u949F\u3001\u4E0D\u4F9D\u8D56\u5916\u90E8\u670D\u52A1\u53EF\u7528\u3001\u4E0D\u4F9D\u8D56\u4E0A\u4E00\u6B21\u8FD0\u884C\u7559\u4E0B\u7684\u6570\u636E\u3002",
+      ["test-4"],
+      "\u5355\u5143\u6D4B\u8BD5\xB7AIR \u539F\u5219"
+    ),
+    rule6(
+      "java-test-tx-rollback",
+      "recommended",
+      "unit-test",
+      "\u6D89\u53CA\u6570\u636E\u5E93\u7684\u7528\u4F8B\u52A0\u4E8B\u52A1\u56DE\u6EDA\uFF08@Transactional + @Rollback\uFF09\uFF0C\u6216\u7ED9\u6D4B\u8BD5\u6570\u636E\u52A0\u7EDF\u4E00\u524D\u540E\u7F00\uFF0C\u907F\u514D\u810F\u6570\u636E\u3002",
+      ["test-11"],
+      "\u5355\u5143\u6D4B\u8BD5\xB7\u6570\u636E\u5E93\u76F8\u5173"
+    ),
+    // ── 安全补充 ──────────────────────────────────────────────────────────
+    rule6(
+      "java-xss-escape",
+      "mandatory",
+      "security",
+      "\u8F93\u51FA\u5230\u9875\u9762\u7684\u7528\u6237\u6570\u636E\u5FC5\u987B\u8F6C\u4E49\uFF1B\u6A21\u677F\u5F15\u64CE\u7684\u9ED8\u8BA4\u8F6C\u4E49\u4E0D\u8981\u5173\uFF0C\u5BCC\u6587\u672C\u573A\u666F\u7528\u767D\u540D\u5355\u8FC7\u6EE4\u800C\u4E0D\u662F\u6574\u4F53\u653E\u884C\u3002",
+      ["sec-5"],
+      "\u5B89\u5168\u89C4\u7EA6"
+    ),
+    rule6(
+      "java-replay-protection",
+      "mandatory",
+      "security",
+      "\u6D89\u53CA\u77ED\u4FE1\u3001\u90AE\u4EF6\u3001\u652F\u4ED8\u3001\u4E0B\u5355\u7B49\u5E73\u53F0\u8D44\u6E90\u7684\u5199\u64CD\u4F5C\uFF0C\u5FC5\u987B\u505A\u9632\u91CD\u653E\uFF1A\u5E42\u7B49\u952E\u3001\u9891\u6B21\u9650\u5236\u6216\u9A8C\u8BC1\u7801\uFF0C\u7F3A\u4E00\u4E0D\u53EF\u3002",
+      ["sec-7"],
+      "\u5B89\u5168\u89C4\u7EA6"
+    ),
+    rule6(
+      "java-ugc-risk-control",
+      "recommended",
+      "security",
+      "\u7528\u6237\u751F\u6210\u5185\u5BB9\uFF08\u53D1\u5E16\u3001\u8BC4\u8BBA\u3001\u79C1\u4FE1\uFF09\u8981\u8D70\u9632\u5237\u4E0E\u5185\u5BB9\u98CE\u63A7\uFF08\u9891\u6B21\u9650\u5236\u3001\u8FDD\u7981\u8BCD\u8FC7\u6EE4\u3001\u4EBA\u5DE5\u5BA1\u6838\u515C\u5E95\uFF09\u3002",
+      ["sec-8"],
+      "\u5B89\u5168\u89C4\u7EA6"
+    )
+  ]
+};
+
+// src/core/reviewers/rules/java.ts
+var BASIS_PREFIX6 = "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300Bv1.3.0";
+var SOURCE8 = {
+  name: "\u300A\u963F\u91CC\u5DF4\u5DF4Java\u5F00\u53D1\u624B\u518C\u300B\u8981\u70B9\u63D0\u70BC\uFF08\u8868\u8FF0\u81EA\u64B0\uFF09",
+  url: "https://github.com/alibaba/p3c",
+  license: "own",
+  modified: "\u4EC5\u63D0\u70BC\u89C4\u5219\u8981\u6C42\uFF0C\u7528\u672C\u9879\u76EE\u81EA\u5DF1\u7684\u8BDD\u91CD\u5199\uFF0C\u672A\u590D\u5236\u6761\u6587\u539F\u6587"
+};
+var CLAUSES_OF = {
+  "java-naming-case": ["naming-2", "naming-3", "naming-4"],
+  "java-naming-no-pinyin": ["naming-1"],
+  "java-boolean-no-is": ["naming-7"],
+  "java-abstract-prefix": ["naming-5"],
+  "java-service-dao-naming": ["naming-14"],
+  "java-no-magic-value": ["const-1"],
+  "java-long-uppercase-l": ["const-2"],
+  "java-override-annotation": ["oop-2"],
+  "java-equals-null-safe": ["oop-6"],
+  "java-wrapper-equals": ["oop-7"],
+  "java-pojo-tostring": ["oop-12"],
+  "java-string-builder-in-loop": ["oop-17"],
+  "java-no-remove-in-foreach": ["coll-7"],
+  "java-arrays-aslist-immutable": ["coll-5"],
+  "java-sublist-caution": ["coll-2", "coll-3"],
+  "java-collection-capacity": ["coll-9", "misc-7"],
+  "java-entryset-iteration": ["coll-10"],
+  "java-interface-no-modifier": ["naming-12"],
+  "java-catch-must-handle": ["exc-4"],
+  "java-no-exception-for-flow": ["exc-2"],
+  "java-narrow-try-scope": ["exc-3"],
+  "java-finally-no-return": ["exc-7"],
+  "java-log-slf4j-placeholder": ["log-4"],
+  "java-log-with-context": ["log-6"],
+  "java-test-air": ["test-1"],
+  "java-test-location": ["test-7"],
+  "java-test-coverage": ["test-8"],
+  "java-test-db-independent": ["test-10"],
+  "java-authz-check": ["sec-1"],
+  "java-sql-param-binding": ["sec-3"],
+  "java-input-validation": ["sec-4", "ctrl-6"],
+  "java-sensitive-mask": ["sec-2"],
+  "java-csrf-protection": ["sec-6"],
+  "java-table-three-fields": ["db-table-9"],
+  "java-decimal-not-float": ["db-table-6"],
+  "java-is-xxx-tinyint": ["db-table-1"],
+  "java-index-naming": ["db-table-5"],
+  "java-varchar-length": ["db-table-8"],
+  "java-no-snapshot-dependency": ["eng-lib-3"],
+  "java-unified-version-variable": ["eng-lib-6"],
+  "java-layer-dependency": ["eng-layer-1"]
+};
+var SQL_ONLY2 = /* @__PURE__ */ new Set([
+  "java-table-three-fields",
+  "java-decimal-not-float",
+  "java-is-xxx-tinyint",
+  "java-index-naming",
+  "java-varchar-length"
+]);
+function rule7(id, level, dimension, instruction, basis) {
+  return {
+    id,
+    level,
+    dimension,
+    title: instruction.slice(0, 30),
+    instruction,
+    languages: SQL_ONLY2.has(id) ? ["sql"] : ["java"],
+    clauses: CLAUSES_OF[id] ?? [],
+    source: { ...SOURCE8, basis: `${BASIS_PREFIX6} ${basis}` }
   };
 }
 var JAVA_RULES = {
   entries: [
     // ── 命名 ──────────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-naming-case",
       "mandatory",
       "naming",
       "\u7C7B\u540D\u7528\u5927\u9A7C\u5CF0\uFF0C\u65B9\u6CD5\u540D\u3001\u53C2\u6570\u540D\u3001\u6210\u5458\u53D8\u91CF\u3001\u5C40\u90E8\u53D8\u91CF\u7528\u5C0F\u9A7C\u5CF0\uFF0C\u5E38\u91CF\u5168\u5927\u5199\u4E0B\u5212\u7EBF\u5206\u9694\uFF0C\u5305\u540D\u5168\u5C0F\u5199\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
-    rule2(
+    rule7(
       "java-naming-no-pinyin",
       "mandatory",
       "naming",
       "\u547D\u540D\u4E0D\u5F97\u7528\u62FC\u97F3\u3001\u4E2D\u82F1\u6DF7\u5199\u6216\u7EAF\u4E2D\u6587\uFF0C\u4E5F\u4E0D\u8981\u7528\u671B\u6587\u4E0D\u77E5\u4E49\u7684\u7F29\u5199\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
-    rule2(
+    rule7(
       "java-boolean-no-is",
       "mandatory",
       "naming",
       "POJO \u7684\u5E03\u5C14\u5C5E\u6027\u4E0D\u8981\u52A0 is \u524D\u7F00\uFF0C\u90E8\u5206\u5E8F\u5217\u5316\u6846\u67B6\u4F1A\u628A\u5B83\u5F53\u6210 getter \u4ECE\u800C\u89E3\u6790\u9519\u5B57\u6BB5\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
-    rule2(
+    rule7(
       "java-abstract-prefix",
       "recommended",
       "naming",
       "\u62BD\u8C61\u7C7B\u540D\u4EE5 Abstract \u6216 Base \u5F00\u5934\uFF0C\u5F02\u5E38\u7C7B\u4EE5 Exception \u7ED3\u5C3E\uFF0C\u6D4B\u8BD5\u7C7B\u4EE5\u88AB\u6D4B\u7C7B\u540D\u5F00\u5934\u52A0 Test\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
-    rule2(
+    rule7(
       "java-service-dao-naming",
       "reference",
       "naming",
@@ -10520,84 +11570,84 @@ var JAVA_RULES = {
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
     // ── 编程 ──────────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-no-magic-value",
       "mandatory",
       "coding",
       "\u4E0D\u5141\u8BB8\u672A\u5B9A\u4E49\u7684\u5E38\u91CF\u503C\uFF08\u9B54\u6CD5\u503C\uFF09\u76F4\u63A5\u51FA\u73B0\u5728\u4EE3\u7801\u91CC\uFF0C\u62BD\u6210\u6709\u540D\u5B57\u7684\u5E38\u91CF\u6216\u679A\u4E3E\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E38\u91CF\u5B9A\u4E49"
     ),
-    rule2(
+    rule7(
       "java-long-uppercase-l",
       "mandatory",
       "coding",
       "long \u5B57\u9762\u91CF\u7528\u5927\u5199 L\uFF0C\u5C0F\u5199 l \u5BB9\u6613\u4E0E\u6570\u5B57 1 \u6DF7\u6DC6\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u5E38\u91CF\u5B9A\u4E49"
     ),
-    rule2(
+    rule7(
       "java-override-annotation",
       "mandatory",
       "coding",
       "\u6240\u6709\u8986\u5199\u65B9\u6CD5\u5FC5\u987B\u52A0 @Override\uFF0C\u8BA9\u7F16\u8BD1\u671F\u5C31\u80FD\u53D1\u73B0\u7B7E\u540D\u5199\u9519\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-equals-null-safe",
       "mandatory",
       "coding",
       "\u8C03\u7528 equals \u65F6\u628A\u5E38\u91CF\u6216\u786E\u5B9A\u975E\u7A7A\u7684\u5BF9\u8C61\u653E\u5728\u524D\u9762\uFF0C\u907F\u514D\u7A7A\u6307\u9488\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-wrapper-equals",
       "mandatory",
       "coding",
       "\u5305\u88C5\u7C7B\u578B\u4E4B\u95F4\u6BD4\u8F83\u503C\u4E00\u5F8B\u7528 equals\uFF0C\u4E0D\u8981\u7528 ==\uFF08Integer \u7F13\u5B58\u8303\u56F4\u5916\u4F1A\u5F97\u5230\u53CD\u76F4\u89C9\u7ED3\u679C\uFF09\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-no-remove-in-foreach",
       "mandatory",
       "coding",
       "\u4E0D\u8981\u5728 foreach \u5FAA\u73AF\u91CC\u5BF9\u96C6\u5408\u505A remove/add\uFF0C\u7528\u8FED\u4EE3\u5668\u6216 removeIf \u66FF\u4EE3\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-arrays-aslist-immutable",
       "mandatory",
       "coding",
       "Arrays.asList \u8FD4\u56DE\u7684\u662F\u56FA\u5B9A\u957F\u5EA6\u89C6\u56FE\uFF0C\u5BF9\u5B83 add/remove \u4F1A\u629B\u5F02\u5E38\uFF1B\u9700\u8981\u53EF\u53D8\u96C6\u5408\u8981\u518D\u5305\u4E00\u5C42\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-sublist-caution",
       "mandatory",
       "coding",
       "subList \u7684\u7ED3\u679C\u4E0D\u80FD\u5F3A\u8F6C\u6210 ArrayList\uFF0C\u4E14\u539F\u96C6\u5408\u5143\u7D20\u6570\u91CF\u53D8\u52A8\u4F1A\u8BA9\u5B50\u5217\u8868\u5931\u6548\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-string-builder-in-loop",
       "recommended",
       "coding",
       "\u5FAA\u73AF\u4F53\u5185\u62FC\u63A5\u5B57\u7B26\u4E32\u7528 StringBuilder\uFF0C\u4E0D\u8981\u7528 + \u53CD\u590D\u4EA7\u751F\u4E34\u65F6\u5BF9\u8C61\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7OOP \u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-collection-capacity",
       "recommended",
       "coding",
       "\u96C6\u5408\u521D\u59CB\u5316\u65F6\u6309\u9884\u4F30\u89C4\u6A21\u6307\u5B9A\u521D\u59CB\u5BB9\u91CF\uFF0C\u907F\u514D\u53CD\u590D\u6269\u5BB9\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-entryset-iteration",
       "recommended",
       "coding",
       "\u904D\u5386 Map \u7684\u952E\u503C\u5BF9\u7528 entrySet\uFF0C\u4E0D\u8981\u5148\u53D6 keySet \u518D\u9010\u4E2A get\u3002",
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u96C6\u5408\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-interface-no-modifier",
       "reference",
       "coding",
@@ -10605,42 +11655,42 @@ var JAVA_RULES = {
       "\u7F16\u7A0B\u89C4\u7EA6\xB7\u547D\u540D\u98CE\u683C"
     ),
     // ── 异常与日志 ────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-catch-must-handle",
       "mandatory",
       "exception-log",
       "catch \u4F4F\u5C31\u5FC5\u987B\u5904\u7406\u6216\u5411\u4E0A\u629B\u51FA\uFF0C\u4E0D\u5141\u8BB8\u6355\u83B7\u540E\u4EC0\u4E48\u90FD\u4E0D\u505A\u3002",
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-no-exception-for-flow",
       "mandatory",
       "exception-log",
       "\u5F02\u5E38\u4E0D\u8981\u7528\u6765\u505A\u6D41\u7A0B\u63A7\u5236\u6216\u6761\u4EF6\u63A7\u5236\uFF0C\u5B83\u7684\u5F00\u9500\u8FDC\u9AD8\u4E8E\u6761\u4EF6\u5206\u652F\u3002",
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-narrow-try-scope",
       "mandatory",
       "exception-log",
       "try \u5757\u53EA\u5305\u53EF\u80FD\u629B\u5F02\u5E38\u7684\u6700\u5C0F\u8303\u56F4\uFF0C\u4E0D\u8981\u6574\u6BB5\u65B9\u6CD5\u4F53\u4E00\u8D77 try\u3002",
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-finally-no-return",
       "mandatory",
       "exception-log",
       "finally \u5757\u91CC\u4E0D\u8981 return\uFF0C\u5B83\u4F1A\u8986\u76D6 try \u4E2D\u7684\u8FD4\u56DE\u503C\u5E76\u541E\u6389\u5F02\u5E38\u3002",
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u5F02\u5E38\u5904\u7406"
     ),
-    rule2(
+    rule7(
       "java-log-slf4j-placeholder",
       "mandatory",
       "exception-log",
       "\u65E5\u5FD7\u4F9D\u8D56 SLF4J \u95E8\u9762\u5E76\u7528\u5360\u4F4D\u7B26\u4F20\u53C2\uFF0C\u4E0D\u8981\u76F4\u63A5\u8C03\u5177\u4F53\u65E5\u5FD7\u5B9E\u73B0\uFF0C\u4E5F\u4E0D\u8981\u7528\u5B57\u7B26\u4E32\u62FC\u63A5\u3002",
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u65E5\u5FD7\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-log-with-context",
       "mandatory",
       "exception-log",
@@ -10648,28 +11698,28 @@ var JAVA_RULES = {
       "\u5F02\u5E38\u65E5\u5FD7\xB7\u65E5\u5FD7\u89C4\u7EA6"
     ),
     // ── 单元测试 ──────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-test-air",
       "mandatory",
       "unit-test",
       "\u5355\u5143\u6D4B\u8BD5\u8981\u6EE1\u8DB3 AIR\uFF1A\u81EA\u52A8\u6267\u884C\u3001\u76F8\u4E92\u72EC\u7ACB\u3001\u53EF\u91CD\u590D\u8FD0\u884C\uFF0C\u4E0D\u53D7\u5916\u754C\u73AF\u5883\u4E0E\u6267\u884C\u987A\u5E8F\u5F71\u54CD\u3002",
       "\u5355\u5143\u6D4B\u8BD5\xB7AIR \u539F\u5219"
     ),
-    rule2(
+    rule7(
       "java-test-location",
       "mandatory",
       "unit-test",
       "\u6D4B\u8BD5\u4EE3\u7801\u653E\u5728 src/test/java \u4E0B\uFF0C\u4E0D\u8981\u6DF7\u8FDB\u4E1A\u52A1\u4EE3\u7801\u76EE\u5F55\u3002",
       "\u5355\u5143\u6D4B\u8BD5"
     ),
-    rule2(
+    rule7(
       "java-test-coverage",
       "recommended",
       "unit-test",
       "\u6838\u5FC3\u6A21\u5757\u7684\u8BED\u53E5\u8986\u76D6\u7387\u76EE\u6807 70% \u4EE5\u4E0A\uFF1B\u4E3A\u51D1\u8986\u76D6\u7387\u5199\u4E0D\u89C4\u8303\u6D4B\u8BD5\u4E0D\u5982\u4E0D\u5199\u3002",
       "\u5355\u5143\u6D4B\u8BD5"
     ),
-    rule2(
+    rule7(
       "java-test-db-independent",
       "recommended",
       "unit-test",
@@ -10677,35 +11727,35 @@ var JAVA_RULES = {
       "\u5355\u5143\u6D4B\u8BD5"
     ),
     // ── 安全 ──────────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-authz-check",
       "mandatory",
       "security",
       "\u6D89\u53CA\u7528\u6237\u4E2A\u4EBA\u8D44\u6E90\u7684\u529F\u80FD\u5FC5\u987B\u505A\u6743\u9650\u4E0E\u5F52\u5C5E\u6821\u9A8C\uFF0C\u4E0D\u80FD\u53EA\u770B\u662F\u5426\u767B\u5F55\u3002",
       "\u5B89\u5168\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-sql-param-binding",
       "mandatory",
       "security",
       "SQL \u53C2\u6570\u4E00\u5F8B\u7528\u53C2\u6570\u7ED1\u5B9A\u6216\u5B57\u6BB5\u503C\u9650\u5B9A\uFF0C\u7981\u6B62\u628A\u7528\u6237\u8F93\u5165\u62FC\u8FDB\u8BED\u53E5\u3002",
       "\u5B89\u5168\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-input-validation",
       "mandatory",
       "security",
       "\u5916\u90E8\u8BF7\u6C42\u7684\u4EFB\u4F55\u53C2\u6570\u90FD\u5FC5\u987B\u505A\u6709\u6548\u6027\u6821\u9A8C\u540E\u518D\u4F7F\u7528\u3002",
       "\u5B89\u5168\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-sensitive-mask",
       "mandatory",
       "security",
       "\u7528\u6237\u654F\u611F\u6570\u636E\uFF08\u624B\u673A\u53F7\u3001\u8BC1\u4EF6\u53F7\u3001\u94F6\u884C\u5361\u7B49\uFF09\u5C55\u793A\u524D\u5FC5\u987B\u8131\u654F\u3002",
       "\u5B89\u5168\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-csrf-protection",
       "mandatory",
       "security",
@@ -10713,35 +11763,35 @@ var JAVA_RULES = {
       "\u5B89\u5168\u89C4\u7EA6"
     ),
     // ── 数据库 ────────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-table-three-fields",
       "mandatory",
       "database",
       "\u8868\u5FC5\u5907\u4E09\u5B57\u6BB5\uFF1A\u4E3B\u952E id\u3001\u521B\u5EFA\u65F6\u95F4 gmt_create\u3001\u66F4\u65B0\u65F6\u95F4 gmt_modified\u3002",
       "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-decimal-not-float",
       "mandatory",
       "database",
       "\u91D1\u989D\u7B49\u7CBE\u786E\u5C0F\u6570\u7528 decimal\uFF0C\u7981\u6B62\u7528 float/double\u3002",
       "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-is-xxx-tinyint",
       "mandatory",
       "database",
       "\u8868\u8FBE\u300C\u662F/\u5426\u300D\u7684\u5B57\u6BB5\u7528 is_xxx \u547D\u540D\uFF0C\u7C7B\u578B\u4E3A unsigned tinyint\u3002",
       "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-index-naming",
       "recommended",
       "database",
       "\u7D22\u5F15\u6309\u7528\u9014\u547D\u540D\uFF1A\u4E3B\u952E pk_\u3001\u552F\u4E00\u7D22\u5F15 uk_\u3001\u666E\u901A\u7D22\u5F15 idx_ \u52A0\u5B57\u6BB5\u540D\u3002",
       "MySQL \u6570\u636E\u5E93\xB7\u7D22\u5F15\u89C4\u7EA6"
     ),
-    rule2(
+    rule7(
       "java-varchar-length",
       "recommended",
       "database",
@@ -10749,21 +11799,21 @@ var JAVA_RULES = {
       "MySQL \u6570\u636E\u5E93\xB7\u5EFA\u8868\u89C4\u7EA6"
     ),
     // ── 工程结构 ──────────────────────────────────────────────────────────
-    rule2(
+    rule7(
       "java-no-snapshot-dependency",
       "mandatory",
       "architecture",
       "\u7EBF\u4E0A\u5E94\u7528\u4E0D\u8981\u4F9D\u8D56 SNAPSHOT \u7248\u672C\uFF0C\u5426\u5219\u53D1\u5E03\u4E0D\u53EF\u91CD\u590D\u3002",
       "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
     ),
-    rule2(
+    rule7(
       "java-unified-version-variable",
       "recommended",
       "architecture",
       "\u4E00\u7EC4\u4E8C\u65B9\u5E93\u4F9D\u8D56\u7528\u7EDF\u4E00\u7684\u7248\u672C\u53D8\u91CF\u7BA1\u7406\uFF0C\u907F\u514D\u7248\u672C\u53F7\u6563\u843D\u5404\u5904\u9020\u6210\u4E0D\u4E00\u81F4\u3002",
       "\u5DE5\u7A0B\u7ED3\u6784\xB7\u4E8C\u65B9\u5E93\u4F9D\u8D56"
     ),
-    rule2(
+    rule7(
       "java-layer-dependency",
       "recommended",
       "architecture",
@@ -10774,8 +11824,18 @@ var JAVA_RULES = {
 };
 
 // src/core/reviewers/rules/index.ts
+var JAVA_ALL_RULES = {
+  entries: [
+    ...JAVA_RULES.entries,
+    ...JAVA_CORE_RULES.entries,
+    ...JAVA_QUALITY_RULES.entries,
+    ...JAVA_DB_RULES.entries,
+    ...JAVA_BUILD_RULES.entries,
+    ...JAVA_FORMAT_RULES.entries
+  ]
+};
 var BUILTIN_RULES = {
-  entries: [...GENERAL_RULES, ...JAVA_RULES.entries, ...FRONTEND_RULES.entries]
+  entries: [...GENERAL_RULES, ...JAVA_ALL_RULES.entries, ...FRONTEND_RULES.entries]
 };
 
 // src/core/reviewers/rules/library.ts
@@ -10787,7 +11847,8 @@ var DIMENSION_LABEL = {
   security: "\u5B89\u5168",
   database: "\u6570\u636E\u5E93",
   architecture: "\u5DE5\u7A0B\u7ED3\u6784",
-  frontend: "\u524D\u7AEF\u5DE5\u7A0B"
+  frontend: "\u524D\u7AEF\u5DE5\u7A0B",
+  format: "\u683C\u5F0F"
 };
 var MAX_INJECTED_RULES = 18;
 function languageOf(path) {
@@ -10813,6 +11874,9 @@ function languageOf(path) {
       return "rust";
     case "sql":
       return "sql";
+    // MyBatis 的 SQL 写在 mapper.xml 里，不认这个扩展名就永远查不到 ${} 这类问题
+    case "xml":
+      return "xml";
     default:
       return "*";
   }
@@ -10842,6 +11906,13 @@ function globToRegExp(pattern) {
   }
   return new RegExp(`^${out}$`);
 }
+function isTestPath(path) {
+  const lower = path.toLowerCase();
+  if (lower.includes("/src/test/") || lower.includes("/test/") || lower.includes("/tests/"))
+    return true;
+  if (lower.includes("/__tests__/") || lower.includes("/spec/")) return true;
+  return /(test|tests|spec)\.(java|kt|ts|tsx|js|jsx|py|go)$/.test(lower);
+}
 function matchesAny(path, patterns) {
   return patterns.some((pattern) => globToRegExp(pattern).test(path));
 }
@@ -10858,16 +11929,20 @@ var DIMENSION_RANK = {
   "unit-test": 4,
   architecture: 5,
   naming: 6,
-  frontend: 7
+  frontend: 7,
+  // 格式排最后：它几乎总是被格式化工具接管，只在没有工具时才值得占名额
+  format: 8
 };
 function selectRules(library, options) {
   const limit = options.limit ?? MAX_INJECTED_RULES;
   const path = options.path;
-  const language = path === null ? "*" : languageOf(path);
+  const language = options.language ?? (path === null ? "*" : languageOf(path));
   const applicable = library.entries.filter((entry) => {
     if (options.levels !== void 0 && !options.levels.includes(entry.level)) return false;
     if (options.dimensions !== void 0 && !options.dimensions.includes(entry.dimension))
       return false;
+    if (entry.dimension === "format" && options.includeFormat !== true) return false;
+    if (entry.dimension === "unit-test" && path !== null && !isTestPath(path)) return false;
     const languageOk = entry.languages.includes("*") || entry.languages.includes(language);
     if (!languageOk) return false;
     const patterns = entry.pathPatterns ?? [];
@@ -10876,13 +11951,36 @@ function selectRules(library, options) {
     return matchesAny(path, patterns);
   });
   const specificity = (entry) => (entry.pathPatterns ?? []).length > 0 ? 1 : 0;
-  return [...applicable].sort((a, b) => {
+  const byRules = [...applicable].sort((a, b) => {
     const byLevel = LEVEL_RANK[a.level] - LEVEL_RANK[b.level];
     if (byLevel !== 0) return byLevel;
-    const byDimension = DIMENSION_RANK[a.dimension] - DIMENSION_RANK[b.dimension];
-    if (byDimension !== 0) return byDimension;
     return specificity(b) - specificity(a);
-  }).slice(0, limit);
+  });
+  return interleaveByDimension(byRules, limit);
+}
+function interleaveByDimension(rules, limit) {
+  const groups2 = /* @__PURE__ */ new Map();
+  for (const entry of rules) {
+    const list = groups2.get(entry.dimension) ?? [];
+    list.push(entry);
+    groups2.set(entry.dimension, list);
+  }
+  const order = [...groups2.keys()].sort((a, b) => DIMENSION_RANK[a] - DIMENSION_RANK[b]);
+  const picked = [];
+  let round = 0;
+  while (picked.length < limit) {
+    let added = false;
+    for (const dimension of order) {
+      if (picked.length >= limit) break;
+      const entry = groups2.get(dimension)?.[round];
+      if (entry === void 0) continue;
+      picked.push(entry);
+      added = true;
+    }
+    if (!added) break;
+    round += 1;
+  }
+  return picked;
 }
 var LEVEL_LABEL = {
   mandatory: "\u5F3A\u5236",
@@ -10892,10 +11990,10 @@ var LEVEL_LABEL = {
 function renderRuleBlock(rules) {
   if (rules.length === 0) return "";
   const groups2 = /* @__PURE__ */ new Map();
-  for (const rule3 of rules) {
-    const list = groups2.get(rule3.dimension) ?? [];
-    list.push(rule3);
-    groups2.set(rule3.dimension, list);
+  for (const rule8 of rules) {
+    const list = groups2.get(rule8.dimension) ?? [];
+    list.push(rule8);
+    groups2.set(rule8.dimension, list);
   }
   const sections = ["\u4EE5\u4E0B\u662F\u4ED3\u5E93\u7684\u65E2\u6709\u7EA6\u5B9A\uFF0C\u4F5C\u4E3A\u5BA1\u67E5\u4F9D\u636E\uFF1A"];
   for (const [dimension, entries] of groups2) {
@@ -12442,13 +13540,25 @@ async function runReview(request2, deps) {
   };
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
-    const ruleBlock = renderRuleBlock(selectRules(BUILTIN_RULES, { path: file.path }));
+    const correctnessRules = renderRuleBlock(
+      selectRules(BUILTIN_RULES, {
+        path: file.path,
+        dimensions: ["coding", "exception-log", "database", "unit-test"]
+      })
+    );
+    const securityRules = renderRuleBlock(
+      selectRules(BUILTIN_RULES, { path: file.path, dimensions: ["security"] })
+    );
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
         const result = await runWithRetry(
           deps,
           SPECS.correctness,
-          { file: file.path, segments, ...ruleBlock === "" ? {} : { note: ruleBlock } },
+          {
+            file: file.path,
+            segments,
+            ...correctnessRules === "" ? {} : { note: correctnessRules }
+          },
           modelFor("correctness", file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
@@ -12483,7 +13593,7 @@ async function runReview(request2, deps) {
             {
               file: file.path,
               segments,
-              note: [`\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`, ruleBlock].filter((part) => part !== "").join("\n\n")
+              note: [`\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`, securityRules].filter((part) => part !== "").join("\n\n")
             },
             modelFor("security", file.path)
           );
@@ -12525,7 +13635,7 @@ async function runReview(request2, deps) {
             segments: globalSegments,
             note: [
               "\u8FD9\u662F\u5168\u5C40\u89C6\u89D2\uFF0C\u8BF7\u6BD4\u8F83\u4E0D\u540C\u6587\u4EF6\u4E4B\u95F4\u7684\u5199\u6CD5\u662F\u5426\u4E00\u81F4",
-              renderRuleBlock(selectRules(BUILTIN_RULES, { path: null }))
+              globalRules(diff.files.map((file) => file.path))
             ].filter((part) => part !== "").join("\n\n")
           },
           model: modelFor("convention", null),
@@ -12716,6 +13826,21 @@ async function runWithRetry(deps, spec, input, model, shrink) {
     calls: first.calls + second.calls,
     usage: sumUsage(first.usage, second.usage)
   };
+}
+function globalRules(paths) {
+  const languages = new Set(paths.map((path) => languageOf(path)).filter((lang) => lang !== "*"));
+  if (languages.size === 0) return "";
+  const merged = /* @__PURE__ */ new Map();
+  for (const language of languages) {
+    const picked = selectRules(BUILTIN_RULES, {
+      path: null,
+      language,
+      dimensions: ["naming", "architecture", "format"],
+      includeFormat: true
+    });
+    for (const entry of picked) merged.set(entry.id, entry);
+  }
+  return renderRuleBlock(interleaveByDimension([...merged.values()], 18));
 }
 function buildCheckpointState(diff, configHash, promptHash) {
   return {

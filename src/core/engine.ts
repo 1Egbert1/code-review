@@ -38,7 +38,12 @@ import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
 import { computeCost } from './cost/pricing.js';
 import { BUILTIN_RULES } from './reviewers/rules/index.js';
-import { renderRuleBlock, selectRules } from './reviewers/rules/library.js';
+import {
+  interleaveByDimension,
+  languageOf,
+  renderRuleBlock,
+  selectRules,
+} from './reviewers/rules/library.js';
 import { routeModel } from './routing/model-route.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
@@ -265,15 +270,34 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
-    // 规则按语言与路径挑，不是全量塞——几百条规范塞进去只会稀释注意力
-    const ruleBlock = renderRuleBlock(selectRules(BUILTIN_RULES, { path: file.path }));
+
+    /**
+     * 规则按「维度 → 语言 → 路径」挑，不是全量塞。
+     *
+     * 这里按审核员分维度取，而不是让每个审核员都拿到全部规则：正确性审核员去看
+     * 权限校验是没有意义的，安全审核员去看命名风格同样是浪费名额。规则选择完全由
+     * 这段代码决定，模型没有「要不要查这条规则」的余地——它有判断权，但没有取材权。
+     */
+    const correctnessRules = renderRuleBlock(
+      selectRules(BUILTIN_RULES, {
+        path: file.path,
+        dimensions: ['coding', 'exception-log', 'database', 'unit-test'],
+      }),
+    );
+    const securityRules = renderRuleBlock(
+      selectRules(BUILTIN_RULES, { path: file.path, dimensions: ['security'] }),
+    );
 
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
         const result = await runWithRetry(
           deps,
           SPECS.correctness,
-          { file: file.path, segments, ...(ruleBlock === '' ? {} : { note: ruleBlock }) },
+          {
+            file: file.path,
+            segments,
+            ...(correctnessRules === '' ? {} : { note: correctnessRules }),
+          },
           modelFor('correctness', file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
@@ -311,7 +335,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
             {
               file: file.path,
               segments,
-              note: [`安全审查原因：${decision.reasons.join('、')}`, ruleBlock]
+              note: [`安全审查原因：${decision.reasons.join('、')}`, securityRules]
                 .filter((part) => part !== '')
                 .join('\n\n'),
             },
@@ -360,7 +384,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
             segments: globalSegments,
             note: [
               '这是全局视角，请比较不同文件之间的写法是否一致',
-              renderRuleBlock(selectRules(BUILTIN_RULES, { path: null })),
+              globalRules(diff.files.map((file) => file.path)),
             ]
               .filter((part) => part !== '')
               .join('\n\n'),
@@ -609,6 +633,35 @@ async function runWithRetry(
     calls: first.calls + second.calls,
     usage: sumUsage(first.usage, second.usage),
   };
+}
+
+/**
+ * 全局视角的规则块。
+ *
+ * 两个要点：
+ * 1. **按本次改动涉及的语言取**，不是不筛语言。不筛的结果是一条都取不到（语言特定规则
+ *    都不含 `*`），全筛的结果是 Java 仓库里注入前端命名规则。
+ * 2. 多语言仓库合并后仍要轮转截断，否则又回到「先遍历到的语言吃满名额」。
+ *
+ * 走到这里说明没检出任何 lint 配置（检出就整体静音了），格式确实没人管，所以带上 format。
+ */
+function globalRules(paths: readonly string[]): string {
+  const languages = new Set(paths.map((path) => languageOf(path)).filter((lang) => lang !== '*'));
+  if (languages.size === 0) return '';
+
+  const merged = new Map<string, ReturnType<typeof selectRules>[number]>();
+  for (const language of languages) {
+    const picked = selectRules(BUILTIN_RULES, {
+      path: null,
+      language,
+      dimensions: ['naming', 'architecture', 'format'],
+      includeFormat: true,
+    });
+    for (const entry of picked) merged.set(entry.id, entry);
+  }
+
+  // 每种语言各取了一批，合并后可能超出单次注入上限，再轮转一次
+  return renderRuleBlock(interleaveByDimension([...merged.values()], 18));
 }
 
 function buildCheckpointState(
