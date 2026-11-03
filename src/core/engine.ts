@@ -36,6 +36,7 @@ import {
 } from './reconcile/checkpoint.js';
 import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
+import { routeModel } from './routing/model-route.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
 import { publish } from './publish/publisher.js';
@@ -241,7 +242,23 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   let budgetExhausted = false;
 
   const dimensions = deps.config.review.dimensions;
-  const model = deps.config.llm.model;
+  const changedByPath = new Map(diff.files.map((file) => [file.path, file.changedCount]));
+
+  /**
+   * 按维度与文件风险选模型。
+   *
+   * 这里每次都重算而不是缓存：它必须是确定性的纯函数，这样评论标记里记的模型
+   * 与调用时用的模型永远一致——两者一旦对不上，「这条结论是哪档模型给的」就说不清了。
+   */
+  const modelFor = (reviewer: ReviewerId, filePath: string | null): string => {
+    const decision = routeModel({
+      config: deps.config.routing,
+      reviewer,
+      filePath,
+      changedLines: filePath === null ? 0 : (changedByPath.get(filePath) ?? 0),
+    });
+    return decision.model ?? deps.config.llm.model;
+  };
 
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
@@ -252,6 +269,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
           deps,
           SPECS.correctness,
           { file: file.path, segments },
+          modelFor('correctness', file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
             return shrunk === null ? null : { ...input, segments: shrunk };
@@ -282,11 +300,16 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
       if (decision.send && !budgetExhausted) {
         try {
-          const result = await runWithRetry(deps, SPECS.security, {
-            file: file.path,
-            segments,
-            note: `安全审查原因：${decision.reasons.join('、')}`,
-          });
+          const result = await runWithRetry(
+            deps,
+            SPECS.security,
+            {
+              file: file.path,
+              segments,
+              note: `安全审查原因：${decision.reasons.join('、')}`,
+            },
+            modelFor('security', file.path),
+          );
 
           totals.calls += result.calls;
           totals.usage = sumUsage(totals.usage, result.usage);
@@ -330,7 +353,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
             segments: globalSegments,
             note: '这是全局视角，请比较不同文件之间的写法是否一致',
           },
-          model,
+          model: modelFor('convention', null),
           temperature: deps.config.llm.temperature,
           maxOutputTokens: deps.config.llm.maxOutputTokens,
         });
@@ -405,7 +428,9 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
     renderBody: (finding) =>
       renderInlineBody(finding, {
         promptVersion: SPECS[finding.reviewer].promptVersion,
-        model,
+        // 标记里记的是**实际使用的模型**：被路由降档时它与默认模型不同，
+        // 这正是事后解释「为什么这条结论变了」需要的证据
+        model: modelFor(finding.reviewer, finding.anchor.file),
       }),
   });
 
@@ -557,6 +582,7 @@ async function runWithRetry(
   deps: EngineDeps,
   spec: ReviewerSpec,
   input: ReviewerInput,
+  model: string,
   shrink?: (input: ReviewerInput) => ReviewerInput | null,
 ): Promise<ReviewerRunResult> {
   const call = (): Promise<ReviewerRunResult> =>
@@ -564,7 +590,7 @@ async function runWithRetry(
       client: deps.client,
       spec,
       input,
-      model: deps.config.llm.model,
+      model,
       temperature: deps.config.llm.temperature,
       maxOutputTokens: deps.config.llm.maxOutputTokens,
       shrink,

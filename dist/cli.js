@@ -10236,6 +10236,74 @@ function resolvedNotice(isoTime) {
   return `> \u8BE5\u95EE\u9898\u5DF2\u5728\u540E\u7EED\u63D0\u4EA4\u4E2D\u4FEE\u590D\uFF08${isoTime}\uFF09\u3002`;
 }
 
+// src/core/routing/model-route.ts
+var RISK_PATH_PATTERNS = [
+  {
+    pattern: /(^|\/)(auth|authz|login|session|permission|role)(\/|\.|$)/i,
+    score: 45,
+    reason: "\u9274\u6743\u76F8\u5173"
+  },
+  {
+    pattern: /(^|\/)(payment|billing|order|refund|settle)(\/|\.|$)/i,
+    score: 40,
+    reason: "\u8D44\u91D1\u76F8\u5173"
+  },
+  { pattern: /(^|\/)(crypto|security|secret|cert)(\/|\.|$)/i, score: 40, reason: "\u52A0\u89E3\u5BC6\u4E0E\u5BC6\u94A5" },
+  {
+    pattern: /(^|\/)(api|routes?|controllers?|handlers?|middleware)(\/|\.|$)/i,
+    score: 25,
+    reason: "\u8BF7\u6C42\u5165\u53E3"
+  },
+  {
+    pattern: /(^|\/)(migrations?|schema|db|database|dao|repository)(\/|\.|$)/i,
+    score: 25,
+    reason: "\u6570\u636E\u5C42"
+  },
+  { pattern: /\.(sql|prisma)$/i, score: 20, reason: "\u6570\u636E\u5E93\u811A\u672C" }
+];
+function computeFileRisk(path, changedLines) {
+  const reasons = [];
+  let score = 0;
+  for (const { pattern, score: weight, reason } of RISK_PATH_PATTERNS) {
+    if (pattern.test(path)) {
+      score += weight;
+      reasons.push(reason);
+    }
+  }
+  if (changedLines > 20) {
+    const extra = Math.min(20, Math.floor((changedLines - 20) / 20) * 5);
+    if (extra > 0) {
+      score += extra;
+      reasons.push(`\u6539\u52A8 ${String(changedLines)} \u884C`);
+    }
+  }
+  return { score: Math.min(100, score), reasons };
+}
+function routeModel(input) {
+  const { config } = input;
+  if (!config.enabled) {
+    return { tier: "default", model: null, reason: "\u8DEF\u7531\u672A\u542F\u7528" };
+  }
+  if (config.fileRiskThreshold > 0 && input.filePath !== null) {
+    const risk = computeFileRisk(input.filePath, input.changedLines);
+    if (risk.score >= config.fileRiskThreshold) {
+      return pick(config, "strong", `\u6587\u4EF6\u98CE\u9669 ${String(risk.score)}\uFF08${risk.reasons.join("\u3001")}\uFF09`);
+    }
+  }
+  if (config.smallChangeLines > 0 && input.changedLines > 0 && input.changedLines <= config.smallChangeLines) {
+    return pick(config, "cheap", `\u6539\u52A8\u4EC5 ${String(input.changedLines)} \u884C`);
+  }
+  const byDimension = config.byDimension[input.reviewer];
+  if (byDimension !== void 0) {
+    return pick(config, byDimension, `\u7EF4\u5EA6 ${input.reviewer} \u6307\u5B9A ${byDimension}`);
+  }
+  return pick(config, config.defaultTier, "\u4F7F\u7528\u9ED8\u8BA4\u6863\u4F4D");
+}
+function pick(config, tier, reason) {
+  const setting = config.tiers[tier];
+  return { tier, model: setting?.model ?? null, reason };
+}
+
 // src/core/reconcile/markers.ts
 var MARKER_VERSION = "v1";
 var MARKER_PATTERN = /<!--\s*acr:(v\d+)\|([\s\S]*?)-->\s*$/;
@@ -11688,7 +11756,16 @@ async function runReview(request2, deps) {
   let truncatedCount = 0;
   let budgetExhausted = false;
   const dimensions = deps.config.review.dimensions;
-  const model = deps.config.llm.model;
+  const changedByPath = new Map(diff.files.map((file) => [file.path, file.changedCount]));
+  const modelFor = (reviewer, filePath) => {
+    const decision = routeModel({
+      config: deps.config.routing,
+      reviewer,
+      filePath,
+      changedLines: filePath === null ? 0 : changedByPath.get(filePath) ?? 0
+    });
+    return decision.model ?? deps.config.llm.model;
+  };
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
     if (dimensions.correctness.enabled && !budgetExhausted) {
@@ -11697,6 +11774,7 @@ async function runReview(request2, deps) {
           deps,
           SPECS.correctness,
           { file: file.path, segments },
+          modelFor("correctness", file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
             return shrunk === null ? null : { ...input, segments: shrunk };
@@ -11724,11 +11802,16 @@ async function runReview(request2, deps) {
       });
       if (decision.send && !budgetExhausted) {
         try {
-          const result = await runWithRetry(deps, SPECS.security, {
-            file: file.path,
-            segments,
-            note: `\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`
-          });
+          const result = await runWithRetry(
+            deps,
+            SPECS.security,
+            {
+              file: file.path,
+              segments,
+              note: `\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`
+            },
+            modelFor("security", file.path)
+          );
           totals.calls += result.calls;
           totals.usage = sumUsage(totals.usage, result.usage);
           rejections.push(...result.rejections);
@@ -11767,7 +11850,7 @@ async function runReview(request2, deps) {
             segments: globalSegments,
             note: "\u8FD9\u662F\u5168\u5C40\u89C6\u89D2\uFF0C\u8BF7\u6BD4\u8F83\u4E0D\u540C\u6587\u4EF6\u4E4B\u95F4\u7684\u5199\u6CD5\u662F\u5426\u4E00\u81F4"
           },
-          model,
+          model: modelFor("convention", null),
           temperature: deps.config.llm.temperature,
           maxOutputTokens: deps.config.llm.maxOutputTokens
         });
@@ -11831,7 +11914,9 @@ async function runReview(request2, deps) {
     existing: snapshot.existingComments,
     renderBody: (finding) => renderInlineBody(finding, {
       promptVersion: SPECS[finding.reviewer].promptVersion,
-      model
+      // 标记里记的是**实际使用的模型**：被路由降档时它与默认模型不同，
+      // 这正是事后解释「为什么这条结论变了」需要的证据
+      model: modelFor(finding.reviewer, finding.anchor.file)
     })
   });
   const summaryMarkdown = renderSummary({
@@ -11935,12 +12020,12 @@ function estimateCost(usage, config) {
   const output = pricing.outputPerMTok / 1e6;
   return usage.uncachedInput * input + usage.cacheWriteShort * input * pricing.cacheWriteShortMultiplier + usage.cacheWriteLong * input * pricing.cacheWriteLongMultiplier + usage.cacheRead * input * pricing.cacheReadMultiplier + usage.output * output;
 }
-async function runWithRetry(deps, spec, input, shrink) {
+async function runWithRetry(deps, spec, input, model, shrink) {
   const call = () => runReviewer({
     client: deps.client,
     spec,
     input,
-    model: deps.config.llm.model,
+    model,
     temperature: deps.config.llm.temperature,
     maxOutputTokens: deps.config.llm.maxOutputTokens,
     shrink

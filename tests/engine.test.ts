@@ -345,3 +345,39 @@ describe('门禁', () => {
     expect(result.gate?.conclusion).toBe('failure');
   });
 });
+
+describe('模型路由', () => {
+  const routed = (): ResolvedConfig => ({
+    ...config(),
+    routing: {
+      ...DEFAULT_CONFIG.routing,
+      enabled: true,
+      tiers: { strong: { model: 'strong-model' }, cheap: { model: 'cheap-model' } },
+      byDimension: { correctness: 'strong', security: 'strong', convention: 'cheap' },
+    },
+  });
+
+  it('调用的模型来自路由结果，而不是配置里的默认模型', async () => {
+    const fake = client();
+    await runReview(REQUEST, {
+      config: routed(),
+      client: fake,
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+    });
+
+    expect(fake.requests[0]?.model).toBe('strong-model');
+  });
+
+  it('路由关闭时用默认模型', async () => {
+    const fake = client();
+    await runReview(REQUEST, {
+      config: config(),
+      client: fake,
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+    });
+
+    expect(fake.requests[0]?.model).toBe(DEFAULT_CONFIG.llm.model);
+  });
+});

@@ -78,10 +78,16 @@ export interface RoutingConfig {
 
 export interface RoutingTier {
   readonly model: string;
-  readonly maxOutputTokens: number;
-  readonly contextWindow: number;
+  /**
+   * 以下三项都可省略，省略时回落到 llm 里的同名配置。
+   *
+   * 只有 model 是必填的：多数人配路由只想换个模型名，逼他填上下文窗口和单价
+   * 只会让人干脆不开路由。真需要区分时再补。
+   */
+  readonly maxOutputTokens?: number;
+  readonly contextWindow?: number;
   /** 该档位的计价；未配则回落到 llm.pricing */
-  readonly pricing: PricingConfig | null;
+  readonly pricing?: PricingConfig | null;
 }
 
 export interface ReviewConfig {
