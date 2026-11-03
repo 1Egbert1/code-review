@@ -11,6 +11,8 @@
 import type { Finding, Severity } from '../../contracts/finding.js';
 import type { InspectionReport, ScoreDimension } from '../../contracts/inspection.js';
 import { formatUsd } from '../cost/pricing.js';
+import { embedHistory } from './history.js';
+import type { HistoryEntry } from './history.js';
 
 const DIMENSION_LABEL: Readonly<Record<ScoreDimension, string>> = {
   complexity: '复杂度',
@@ -41,6 +43,8 @@ export interface RenderReportOptions {
   readonly actions?: readonly string[];
   /** 报告里最多展开多少条明细，默认 20 */
   readonly maxListed?: number;
+  /** 本期摘要；写进正文，供下一期在无状态环境里做趋势对比 */
+  readonly historyEntry?: HistoryEntry;
 }
 
 function location(finding: Finding): string {
@@ -219,7 +223,10 @@ export function renderReport(report: InspectionReport, options: RenderReportOpti
   blocks.push(trendSection(report, options.previous ?? null).join('\n'));
   blocks.push(actionsSection(report, options.actions).join('\n'));
 
-  return blocks.filter((block) => block.trim() !== '').join('\n\n') + '\n';
+  const body = blocks.filter((block) => block.trim() !== '').join('\n\n') + '\n';
+  return options.historyEntry === undefined
+    ? body
+    : `${body}\n${embedHistory(options.historyEntry)}\n`;
 }
 
 /** 报告用的成本说明（若有）。 */

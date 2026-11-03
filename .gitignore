@@ -4,6 +4,9 @@ coverage/
 
 dist/.verify.js
 
+# Wiki 载体的临时克隆目录（内容在远端，不必入库）
+.acr/wiki/
+
 # dist/ 必须入库：Action 被引用时 GitHub 不会替它装依赖、也不会替它构建，
 # 远端直接执行仓库里的这个文件（见规格书 2.1.1）
 

@@ -1,0 +1,40 @@
+# 定期巡检。
+#
+# 两个要点：
+# 1. 用 pull_request_target 之外的普通 schedule 事件，且**不检出代码**——
+#    本 Action 只通过接口读文件，检出反而会把不可信内容带进执行环境。
+# 2. 报告写到常设 Issue（或 Wiki）。不要用 open 状态的 Issue 当载体，那会持续要求注意力。
+name: 代码巡检
+
+on:
+  schedule:
+    # 每月 1 日 02:00 UTC（北京 10:00）。太频繁没有意义：指标要一个月才看得出趋势。
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # Wiki 载体需要；只用 Issue 时可降为 read
+  issues: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        with:
+          mode: inspect
+          api-key: ${{ secrets.AI_REVIEW_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 历史文件进仓库后，趋势在本地跑与 CI 跑之间是连续的
+      - name: 提交本期历史
+        run: |
+          if [ -f .acr/inspection-history.json ]; then
+            git config user.name 'acr-bot'
+            git config user.email 'acr-bot@users.noreply.github.com'
+            git add .acr/inspection-history.json
+            git diff --staged --quiet || git commit -m "chore: 记录巡检历史"
+            git push
+          fi

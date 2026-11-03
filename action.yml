@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   mode:
-    description: review 真发评论；dry-run 只打印
+    description: review 真发评论；dry-run 只打印；inspect 巡检并写报告
     required: false
     default: review
 
@@ -41,5 +41,10 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         AI_REVIEW_API_KEY: ${{ inputs.api-key }}
       run: |
-        node "${{ github.action_path }}/dist/cli.js" "${{ inputs.mode }}"
+        # inspect 走 --write 才会把报告写到 Issue / Wiki；其余模式照原样透传
+        if [ "${{ inputs.mode }}" = "inspect" ]; then
+          node "${{ github.action_path }}/dist/cli.js" inspect --write
+        else
+          node "${{ github.action_path }}/dist/cli.js" "${{ inputs.mode }}"
+        fi
         echo "result=completed" >> "$GITHUB_OUTPUT"

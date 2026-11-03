@@ -8686,7 +8686,10 @@ var require_light = __commonJS({
 });
 
 // src/cli/main.ts
-import { readFile as readFile3 } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, readFile as readFile3, writeFile } from "node:fs/promises";
+import { join as join3 } from "node:path";
+import { promisify } from "node:util";
 
 // src/config/load.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -19825,6 +19828,62 @@ function createGitHubGateway(token) {
         body
       });
     },
+    async listIssuesByLabel(ref, label) {
+      const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
+        owner: ref.owner,
+        repo: ref.repo,
+        labels: label,
+        state: "all",
+        per_page: 100
+      });
+      return issues.map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        body: issue.body ?? "",
+        url: issue.html_url,
+        state: issue.state === "open" ? "open" : "closed"
+      }));
+    },
+    async createIssue(ref, input) {
+      const response = await octokit.rest.issues.create({
+        owner: ref.owner,
+        repo: ref.repo,
+        title: input.title,
+        body: input.body,
+        labels: [...input.labels]
+      });
+      return {
+        number: response.data.number,
+        title: response.data.title,
+        body: response.data.body ?? "",
+        url: response.data.html_url,
+        state: response.data.state === "open" ? "open" : "closed"
+      };
+    },
+    async updateIssue(ref, number, input) {
+      const response = await octokit.rest.issues.update({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: number,
+        ...input.title === void 0 ? {} : { title: input.title },
+        ...input.body === void 0 ? {} : { body: input.body }
+      });
+      return {
+        number: response.data.number,
+        title: response.data.title,
+        body: response.data.body ?? "",
+        url: response.data.html_url,
+        state: response.data.state === "open" ? "open" : "closed"
+      };
+    },
+    async closeIssue(ref, number) {
+      await octokit.rest.issues.update({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: number,
+        state: "closed"
+      });
+    },
     async createCheckRun(ref, input) {
       const response = await octokit.rest.checks.create({
         owner: ref.owner,
@@ -19871,6 +19930,83 @@ function createGitHubGateway(token) {
         resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
       }`;
       await octokit.graphql(mutation, { threadId });
+    }
+  };
+}
+
+// src/platforms/github/reports.ts
+var INSPECTION_LABEL = "acr-inspection";
+function createGitHubIssueWriter(gateway, ref, options = {}) {
+  const prefix = options.titlePrefix ?? "\u4EE3\u7801\u5DE1\u68C0\u62A5\u544A";
+  return {
+    kind: "issue",
+    async write(pageName, markdown) {
+      try {
+        const title = `${prefix} ${pageName}`;
+        const existing = await gateway.listIssuesByLabel(ref, INSPECTION_LABEL);
+        const target = pickLatest(existing);
+        if (target === void 0) {
+          const created = await gateway.createIssue(ref, {
+            title,
+            body: markdown,
+            labels: [INSPECTION_LABEL]
+          });
+          await gateway.closeIssue(ref, created.number);
+          return { ok: true, reference: `#${String(created.number)}`, url: created.url };
+        }
+        const updated = await gateway.updateIssue(ref, target.number, { title, body: markdown });
+        if (updated.state === "open") await gateway.closeIssue(ref, target.number);
+        return { ok: true, reference: `#${String(updated.number)}`, url: updated.url };
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  };
+}
+function pickLatest(issues) {
+  return [...issues].sort((a, b) => b.number - a.number)[0];
+}
+function createGitWikiWriter(options) {
+  const authorName = options.authorName ?? "acr-bot";
+  const authorEmail = options.authorEmail ?? "acr-bot@users.noreply.github.com";
+  return {
+    kind: "wiki",
+    async write(pageName, markdown) {
+      const { run, workDir, cloneUrl } = options;
+      try {
+        const { mkdir: mkdir2, writeFile: writeFile2 } = await import("node:fs/promises");
+        const { join: join4 } = await import("node:path");
+        await mkdir2(workDir, { recursive: true });
+        const { existsSync } = await import("node:fs");
+        if (existsSync(join4(workDir, ".git"))) {
+          await run("git", ["pull", "--rebase", "--quiet"], workDir);
+        } else {
+          await run("git", ["clone", "--depth", "1", cloneUrl, workDir], workDir);
+        }
+        await writeFile2(join4(workDir, `${pageName}.md`), markdown, "utf8");
+        await run("git", ["add", `${pageName}.md`], workDir);
+        await run(
+          "git",
+          [
+            "-c",
+            `user.name=${authorName}`,
+            "-c",
+            `user.email=${authorEmail}`,
+            "commit",
+            "-m",
+            `\u5DE1\u68C0\u62A5\u544A ${pageName}`
+          ],
+          workDir
+        );
+        await run("git", ["push", "--quiet", "origin", "HEAD"], workDir);
+        return {
+          ok: true,
+          reference: pageName,
+          url: `${cloneUrl.replace(/\.wiki\.git$/, "")}/wiki/${pageName}`
+        };
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
     }
   };
 }
@@ -20335,6 +20471,86 @@ function isBaselineSnapshot(value) {
   return record["version"] === 1 && typeof record["label"] === "string" && typeof record["datasetHash"] === "string" && typeof record["model"] === "string" && typeof record["metrics"] === "object" && record["metrics"] !== null;
 }
 
+// src/core/inspection/carrier.ts
+function chooseCarrier(config, hasWiki) {
+  if (config.carrier !== "auto") return config.carrier;
+  return hasWiki ? "wiki" : "issue";
+}
+async function writeReport(input) {
+  const primary = chooseCarrier(input.config, input.hasWiki);
+  const order = primary === "wiki" ? ["wiki", "issue"] : ["issue"];
+  let warning = null;
+  for (const carrier of order) {
+    const writer = input.writers[carrier];
+    if (writer === void 0) continue;
+    const outcome = await writer.write(input.pageName, input.markdown);
+    if (outcome.ok) {
+      return {
+        location: { carrier: writer.kind, reference: outcome.reference, url: outcome.url },
+        warning: warning === null ? null : `${warning}\uFF0C\u5DF2\u6539\u4E3A\u5199\u5165${carrier === "wiki" ? " Wiki" : " Issue"}`
+      };
+    }
+    warning = warning === null ? `\u5199\u5165${carrier === "wiki" ? " Wiki " : " Issue "}\u5931\u8D25\uFF1A${outcome.reason}` : warning;
+  }
+  return { location: null, warning: warning ?? "\u6CA1\u6709\u53EF\u7528\u7684\u62A5\u544A\u8F7D\u4F53" };
+}
+
+// src/core/inspection/history.ts
+var EMPTY_HISTORY = { version: 1, entries: [] };
+function appendHistory(history, entry, depth) {
+  const entries = [...history.entries, entry];
+  const kept = depth > 0 ? entries.slice(Math.max(0, entries.length - depth)) : entries;
+  return { version: 1, entries: kept };
+}
+function previousOf(history) {
+  return history.entries.length === 0 ? null : history.entries[history.entries.length - 1] ?? null;
+}
+function parseHistory(text2) {
+  const parsed = JSON.parse(text2);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("\u5386\u53F2\u6587\u4EF6\u4E0D\u662F\u4E00\u4E2A\u5BF9\u8C61");
+  }
+  const record = parsed;
+  if (record["version"] !== 1) throw new Error(`\u4E0D\u652F\u6301\u7684\u5386\u53F2\u7248\u672C\uFF1A${String(record["version"])}`);
+  if (!Array.isArray(record["entries"])) throw new Error("\u5386\u53F2\u6587\u4EF6\u7F3A\u5C11 entries \u6570\u7EC4");
+  return { version: 1, entries: record["entries"] };
+}
+function serializeHistory(history) {
+  return `${JSON.stringify(history, null, 2)}
+`;
+}
+var HISTORY_EMBED_PATTERN = /<!--\s*acr:history\s+([A-Za-z0-9+/=]+)\s*-->/;
+var MAX_EMBEDDED_FINGERPRINTS = 200;
+function embedHistory(entry) {
+  const trimmed = {
+    ...entry,
+    fingerprints: entry.fingerprints.slice(0, MAX_EMBEDDED_FINGERPRINTS)
+  };
+  return `<!-- acr:history ${Buffer.from(JSON.stringify(trimmed), "utf8").toString("base64")} -->`;
+}
+function extractEmbeddedHistory(markdown) {
+  const match = HISTORY_EMBED_PATTERN.exec(markdown);
+  if (match === null) return null;
+  try {
+    const decoded = Buffer.from(match[1] ?? "", "base64").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const record = parsed;
+    if (typeof record["totalScore"] !== "number" || typeof record["inspectedAt"] !== "string")
+      return null;
+    if (typeof record["scores"] !== "object" || record["scores"] === null) return null;
+    return {
+      inspectedAt: record["inspectedAt"],
+      totalScore: record["totalScore"],
+      scores: record["scores"],
+      fingerprints: Array.isArray(record["fingerprints"]) ? record["fingerprints"] : [],
+      reference: typeof record["reference"] === "string" ? record["reference"] : null
+    };
+  } catch {
+    return null;
+  }
+}
+
 // src/core/inspection/report.ts
 var DIMENSION_LABEL = {
   complexity: "\u590D\u6742\u5EA6",
@@ -20476,7 +20692,10 @@ function renderReport(report, options = {}) {
   blocks.push(scoreSection(report).join("\n\n"));
   blocks.push(trendSection(report, options.previous ?? null).join("\n"));
   blocks.push(actionsSection(report, options.actions).join("\n"));
-  return blocks.filter((block) => block.trim() !== "").join("\n\n") + "\n";
+  const body = blocks.filter((block) => block.trim() !== "").join("\n\n") + "\n";
+  return options.historyEntry === void 0 ? body : `${body}
+${embedHistory(options.historyEntry)}
+`;
 }
 
 // src/core/inspection/score.ts
@@ -21249,6 +21468,18 @@ function parseFlags(args) {
 function isCommand(value) {
   return COMMANDS.includes(value);
 }
+var execFileAsync = promisify(execFile);
+async function runCommand(command, args, cwd) {
+  await execFileAsync(command, [...args], { cwd });
+}
+async function readHistory(path) {
+  try {
+    return parseHistory(await readFile3(path, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return EMPTY_HISTORY;
+    throw error;
+  }
+}
 function parseRepo(value) {
   const parts = value.split("/");
   if (parts.length !== 2) return null;
@@ -21443,31 +21674,112 @@ ${USAGE}`);
 `);
         return 1;
       }
-      const files = await collectSourceFiles(resolved.cwd);
-      const manifest = await readOptional(resolved.cwd, "package.json");
-      const allFiles = manifest === null ? files : [...files, manifest];
       const coverageText = flags["coverage"];
       const coverage = coverageText === void 0 || coverageText === "" ? null : Number(coverageText);
       if (coverage !== null && !Number.isFinite(coverage)) {
         stderr("--coverage \u5FC5\u987B\u662F\u6570\u5B57\uFF08\u767E\u5206\u6BD4\uFF09\n");
         return 2;
       }
-      const report = runInspection({
+      const willWrite = flags["write"] !== void 0;
+      let gateway = null;
+      let repo = null;
+      if (willWrite) {
+        const token = resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env["GITHUB_TOKEN"];
+        const repoText = loaded.config.platform.repository ?? resolved.env["GITHUB_REPOSITORY"];
+        repo = repoText === void 0 || repoText === null ? null : parseRepo(repoText);
+        if (token === void 0 || token === "" || repo === null) {
+          stderr(
+            "\u5199\u5165\u9700\u8981\u4EE4\u724C\u4E0E\u4ED3\u5E93\uFF1A\u8BBE\u7F6E GITHUB_TOKEN \u4E0E GITHUB_REPOSITORY\uFF08\u6216\u914D\u7F6E platform.repository\uFF09\n"
+          );
+          return 3;
+        }
+        gateway = createGitHubGateway(token);
+      }
+      const historyFile = join3(resolved.cwd, flags["history"] ?? ".acr/inspection-history.json");
+      const history = await readHistory(historyFile);
+      let previous = previousOf(history);
+      if (gateway !== null && repo !== null) {
+        const issues = await gateway.listIssuesByLabel(repo, INSPECTION_LABEL);
+        const latest = [...issues].sort((a, b) => b.number - a.number)[0];
+        const embedded = latest === void 0 ? null : extractEmbeddedHistory(latest.body);
+        if (embedded !== null) previous = embedded;
+      }
+      const files = await collectSourceFiles(resolved.cwd);
+      const manifest = await readOptional(resolved.cwd, "package.json");
+      const allFiles = manifest === null ? files : [...files, manifest];
+      const inspection = runInspection({
         repository: resolved.env["GITHUB_REPOSITORY"] ?? "local",
         commitSha: resolved.env["GITHUB_SHA"] ?? "unknown",
         files: allFiles,
         config: loaded.config.inspection,
-        coveragePercent: coverage
+        coveragePercent: coverage,
+        ...previous === null ? {} : { previousFingerprints: previous.fingerprints }
       });
-      const markdown = renderReport(report);
+      const entry = {
+        inspectedAt: inspection.inspectedAt,
+        totalScore: inspection.totalScore,
+        scores: inspection.scores,
+        fingerprints: inspection.findings.map((finding) => finding.fingerprint),
+        reference: null
+      };
+      const markdown = renderReport(inspection, {
+        previous: previous === null ? null : {
+          totalScore: previous.totalScore,
+          scores: previous.scores,
+          reference: previous.reference ?? ""
+        },
+        historyEntry: entry
+      });
+      let reference = null;
+      if (gateway !== null && repo !== null) {
+        const info = await gateway.getRepoInfo(repo);
+        const pageName = inspection.inspectedAt.slice(0, 10);
+        const token = resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env["GITHUB_TOKEN"] ?? "";
+        const writeResult = await writeReport({
+          config: loaded.config.inspection,
+          hasWiki: info.hasWiki,
+          pageName,
+          markdown,
+          writers: {
+            issue: createGitHubIssueWriter(gateway, repo),
+            ...info.hasWiki ? {
+              wiki: createGitWikiWriter({
+                cloneUrl: `https://x-access-token:${token}@github.com/${repo.owner}/${repo.repo}.wiki.git`,
+                workDir: join3(resolved.cwd, ".acr", "wiki"),
+                run: runCommand
+              })
+            } : {}
+          }
+        });
+        if (writeResult.warning !== null) stderr(`\u544A\u8B66\uFF1A${writeResult.warning}
+`);
+        reference = writeResult.location?.reference ?? null;
+      }
       const outPath = flags["out"];
       if (outPath !== void 0 && outPath !== "") {
-        const { writeFile } = await import("node:fs/promises");
         await writeFile(outPath, markdown, "utf8");
         stdout(`\u62A5\u544A\u5DF2\u5199\u5165 ${outPath}
 `);
-      } else {
+      } else if (!willWrite) {
         stdout(markdown);
+      }
+      if (reference !== null) stdout(`\u62A5\u544A\u5DF2\u5199\u5165\u5E73\u53F0\uFF1A${reference}
+`);
+      if (flags["no-history"] === void 0) {
+        const updated = appendHistory(
+          history,
+          { ...entry, reference },
+          loaded.config.inspection.historyDepth
+        );
+        try {
+          await mkdir(join3(resolved.cwd, ".acr"), { recursive: true });
+          await writeFile(historyFile, serializeHistory(updated), "utf8");
+        } catch (error) {
+          stderr(
+            `\u544A\u8B66\uFF1A\u5386\u53F2\u672A\u8BB0\u5F55\uFF0C\u4E0B\u671F\u65E0\u6CD5\u5BF9\u6BD4\uFF08${error instanceof Error ? error.message : String(error)}\uFF09
+`
+          );
+        }
       }
       return 0;
     }

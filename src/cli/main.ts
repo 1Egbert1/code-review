@@ -15,15 +15,33 @@
 import type { ResolvedConfig } from '../contracts/config.js';
 import type { ReviewRequest } from '../contracts/diff.js';
 import type { ReviewResult } from '../contracts/result.js';
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { loadConfig } from '../config/load.js';
 import { describeActions, runReview } from '../core/engine.js';
 import { createGitHubCommentPort } from '../platforms/github/comments.js';
 import { createGitHubGateway } from '../platforms/github/client.js';
+import {
+  createGitHubIssueWriter,
+  createGitWikiWriter,
+  INSPECTION_LABEL,
+} from '../platforms/github/reports.js';
 import { fetchSnapshot } from '../platforms/github/fetch.js';
 import { createOpenAiCompatClient } from '../providers/openai-compat.js';
 import { compareBaselines, isBaselineSnapshot } from '../core/eval/baseline.js';
+import { writeReport } from '../core/inspection/carrier.js';
+import {
+  appendHistory,
+  EMPTY_HISTORY,
+  extractEmbeddedHistory,
+  parseHistory,
+  previousOf,
+  serializeHistory,
+} from '../core/inspection/history.js';
+import type { HistoryEntry } from '../core/inspection/history.js';
 import { renderReport } from '../core/inspection/report.js';
 import { runInspection } from '../core/inspection/run.js';
 import { collectSourceFiles, readOptional } from './walk.js';
@@ -90,6 +108,23 @@ function parseFlags(args: readonly string[]): Flags {
 
 function isCommand(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
+}
+
+const execFileAsync = promisify(execFile);
+
+/** 执行外部命令。Wiki 写入用它，测试时注入替代实现。 */
+async function runCommand(command: string, args: readonly string[], cwd: string): Promise<void> {
+  await execFileAsync(command, [...args], { cwd });
+}
+
+/** 读历史文件。文件不存在是首期，损坏则报错——把坏历史当空历史会写出「全是新增」的错误结论。 */
+async function readHistory(path: string): Promise<ReturnType<typeof parseHistory>> {
+  try {
+    return parseHistory(await readFile(path, 'utf8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return EMPTY_HISTORY;
+    throw error;
+  }
 }
 
 /** 从 `owner/name` 拆出仓库标识。 */
@@ -331,12 +366,6 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
         return 1;
       }
 
-      const files = await collectSourceFiles(resolved.cwd);
-
-      // package.json 单独补进来：依赖维度要用，但它不是「源码文件」
-      const manifest = await readOptional(resolved.cwd, 'package.json');
-      const allFiles = manifest === null ? files : [...files, manifest];
-
       const coverageText = flags['coverage'];
       const coverage =
         coverageText === undefined || coverageText === '' ? null : Number(coverageText);
@@ -345,27 +374,132 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
         return 2;
       }
 
-      const report = runInspection({
+      // 写入所需的东西先备好：上一期要从平台读，它必须在跑巡检之前拿到
+      const willWrite = flags['write'] !== undefined;
+      let gateway: ReturnType<typeof createGitHubGateway> | null = null;
+      let repo: { owner: string; repo: string } | null = null;
+
+      if (willWrite) {
+        const token = resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env['GITHUB_TOKEN'];
+        const repoText = loaded.config.platform.repository ?? resolved.env['GITHUB_REPOSITORY'];
+        repo = repoText === undefined || repoText === null ? null : parseRepo(repoText);
+
+        if (token === undefined || token === '' || repo === null) {
+          stderr(
+            '写入需要令牌与仓库：设置 GITHUB_TOKEN 与 GITHUB_REPOSITORY（或配置 platform.repository）\n',
+          );
+          return 3;
+        }
+        gateway = createGitHubGateway(token);
+      }
+
+      const historyFile = join(resolved.cwd, flags['history'] ?? '.acr/inspection-history.json');
+      const history = await readHistory(historyFile);
+
+      // 上期优先取平台上的报告：Action 每次都是干净容器，本地历史留不下来
+      let previous: HistoryEntry | null = previousOf(history);
+      if (gateway !== null && repo !== null) {
+        const issues = await gateway.listIssuesByLabel(repo, INSPECTION_LABEL);
+        const latest = [...issues].sort((a, b) => b.number - a.number)[0];
+        const embedded = latest === undefined ? null : extractEmbeddedHistory(latest.body);
+        if (embedded !== null) previous = embedded;
+      }
+
+      const files = await collectSourceFiles(resolved.cwd);
+      // package.json 单独补进来：依赖维度要用，但它不是「源码文件」
+      const manifest = await readOptional(resolved.cwd, 'package.json');
+      const allFiles = manifest === null ? files : [...files, manifest];
+
+      const inspection = runInspection({
         repository: resolved.env['GITHUB_REPOSITORY'] ?? 'local',
         commitSha: resolved.env['GITHUB_SHA'] ?? 'unknown',
         files: allFiles,
         config: loaded.config.inspection,
         coveragePercent: coverage,
+        ...(previous === null ? {} : { previousFingerprints: previous.fingerprints }),
       });
 
-      const markdown = renderReport(report);
+      const entry: HistoryEntry = {
+        inspectedAt: inspection.inspectedAt,
+        totalScore: inspection.totalScore,
+        scores: inspection.scores,
+        fingerprints: inspection.findings.map((finding) => finding.fingerprint),
+        reference: null,
+      };
+
+      const markdown = renderReport(inspection, {
+        previous:
+          previous === null
+            ? null
+            : {
+                totalScore: previous.totalScore,
+                scores: previous.scores,
+                reference: previous.reference ?? '',
+              },
+        historyEntry: entry,
+      });
+
+      let reference: string | null = null;
+      if (gateway !== null && repo !== null) {
+        const info = await gateway.getRepoInfo(repo);
+        const pageName = inspection.inspectedAt.slice(0, 10);
+        const token =
+          resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env['GITHUB_TOKEN'] ?? '';
+
+        const writeResult = await writeReport({
+          config: loaded.config.inspection,
+          hasWiki: info.hasWiki,
+          pageName,
+          markdown,
+          writers: {
+            issue: createGitHubIssueWriter(gateway, repo),
+            ...(info.hasWiki
+              ? {
+                  wiki: createGitWikiWriter({
+                    cloneUrl: `https://x-access-token:${token}@github.com/${repo.owner}/${repo.repo}.wiki.git`,
+                    workDir: join(resolved.cwd, '.acr', 'wiki'),
+                    run: runCommand,
+                  }),
+                }
+              : {}),
+          },
+        });
+
+        if (writeResult.warning !== null) stderr(`告警：${writeResult.warning}\n`);
+        reference = writeResult.location?.reference ?? null;
+      }
+
       const outPath = flags['out'];
       if (outPath !== undefined && outPath !== '') {
-        const { writeFile } = await import('node:fs/promises');
         await writeFile(outPath, markdown, 'utf8');
         stdout(`报告已写入 ${outPath}\n`);
-      } else {
+      } else if (!willWrite) {
         stdout(markdown);
       }
+
+      if (reference !== null) stdout(`报告已写入平台：${reference}\n`);
+
+      // 本地历史仍然记一份：本地连续跑时不必依赖平台
+      if (flags['no-history'] === undefined) {
+        const updated = appendHistory(
+          history,
+          { ...entry, reference },
+          loaded.config.inspection.historyDepth,
+        );
+        try {
+          await mkdir(join(resolved.cwd, '.acr'), { recursive: true });
+          await writeFile(historyFile, serializeHistory(updated), 'utf8');
+        } catch (error) {
+          stderr(
+            `告警：历史未记录，下期无法对比（${error instanceof Error ? error.message : String(error)}）\n`,
+          );
+        }
+      }
+
       return 0;
     }
 
-    // 所有已登记的子命令都在上面处理完了；走到这里说明登记表与实现脱节
+    // 所有已登记的子命令都在上面处理完了；走到这里说明登记表与实现脱节    // 所有已登记的子命令都在上面处理完了；走到这里说明登记表与实现脱节
     stderr('该子命令尚未接入实现\n');
     return 3;
   } catch (error) {

@@ -112,6 +112,25 @@ export interface GitHubWriteGateway {
    */
   resolveThread?(ref: PullRequestRef, commentId: string): Promise<void>;
 
+  /** 按标签列出 issue；巡检用它找上一期报告 */
+  listIssuesByLabel(ref: RepoRef, label: string): Promise<readonly RawIssue[]>;
+
+  /** 新建 issue。巡检报告创建后要立刻关闭，不留 open 条目 */
+  createIssue(
+    ref: RepoRef,
+    input: { readonly title: string; readonly body: string; readonly labels: readonly string[] },
+  ): Promise<RawIssue>;
+
+  /** 更新 issue 正文与标题 */
+  updateIssue(
+    ref: RepoRef,
+    number: number,
+    input: { readonly title?: string; readonly body?: string },
+  ): Promise<RawIssue>;
+
+  /** 关闭 issue。报告类载体必须关，否则会持续要求注意力 */
+  closeIssue(ref: RepoRef, number: number): Promise<void>;
+
   /** 写一次检查运行，返回其 id。这是「阻止合并」唯一的技术落点。 */
   createCheckRun(
     ref: PullRequestRef,
@@ -140,6 +159,15 @@ export type GitHubFullGateway = GitHubGateway & GitHubWriteGateway;
 export interface RawIssueComment {
   readonly id: string;
   readonly body: string;
+}
+
+/** 一条 issue 的概要。巡检报告用它做常设载体。 */
+export interface RawIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly url: string;
+  readonly state: 'open' | 'closed';
 }
 
 /**
@@ -317,6 +345,69 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
         repo: ref.repo,
         comment_id: Number(commentId),
         body,
+      });
+    },
+
+    async listIssuesByLabel(ref, label) {
+      const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
+        owner: ref.owner,
+        repo: ref.repo,
+        labels: label,
+        state: 'all',
+        per_page: 100,
+      });
+
+      return issues.map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        body: issue.body ?? '',
+        url: issue.html_url,
+        state: issue.state === 'open' ? 'open' : 'closed',
+      }));
+    },
+
+    async createIssue(ref, input) {
+      const response = await octokit.rest.issues.create({
+        owner: ref.owner,
+        repo: ref.repo,
+        title: input.title,
+        body: input.body,
+        labels: [...input.labels],
+      });
+
+      return {
+        number: response.data.number,
+        title: response.data.title,
+        body: response.data.body ?? '',
+        url: response.data.html_url,
+        state: response.data.state === 'open' ? 'open' : 'closed',
+      };
+    },
+
+    async updateIssue(ref, number, input) {
+      const response = await octokit.rest.issues.update({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: number,
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.body === undefined ? {} : { body: input.body }),
+      });
+
+      return {
+        number: response.data.number,
+        title: response.data.title,
+        body: response.data.body ?? '',
+        url: response.data.html_url,
+        state: response.data.state === 'open' ? 'open' : 'closed',
+      };
+    },
+
+    async closeIssue(ref, number) {
+      await octokit.rest.issues.update({
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: number,
+        state: 'closed',
       });
     },
 
