@@ -9,13 +9,26 @@ platform:
 
 llm:
   preset: deepseek
-  baseUrl: https://api.deepseek.com/v1
-  model: deepseek-chat
+  # 官方文档给的 base URL 不带 /v1；带 /v1 也能通，但以文档为准
+  baseUrl: https://api.deepseek.com
+  # 2026-11 核实：模型名是 deepseek-flash（不是 deepseek-chat，那个已不在文档里）
+  model: deepseek-flash
   apiKeyEnv: AI_REVIEW_API_KEY
-  contextWindow: 65536
+  # 模型标称 1M。这里按 128K 算预算：单次审查用不到那么长，而超长上下文的
+  # 召回质量下降是普遍现象（具体衰减幅度各模型不同，未实测）。宁少勿多是保守选择。
+  contextWindow: 128000
   maxOutputTokens: 4096
-  # 单价不在这里写死：价格会变，写死就是错的。要算钱时再填 llm.pricing
   structuredOutput: auto
+  # 单价随时会变，这里填的是 2026-11-03 查到的峰值价（每 100 万 token，美元）。
+  # 不填的话 estimatedCostUsd 会是 null——「不知道」而不是「零」。
+  pricing:
+    inputPerMTok: 0.3
+    outputPerMTok: 1.2
+    # DeepSeek 的缓存是自动的，不收写入费
+    cacheWriteShortMultiplier: 0
+    cacheWriteLongMultiplier: 0
+    # 缓存命中价 0.006 / 未命中 0.3 = 1/50
+    cacheReadMultiplier: 0.02
 
 review:
   # 构建产物与样本不进审查：审它们既没意义，还会把 token 烧在压缩代码上

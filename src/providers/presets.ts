@@ -20,9 +20,13 @@ export interface ModelPreset {
 export const PRESETS: Readonly<Record<string, ModelPreset>> = {
   deepseek: {
     name: 'deepseek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat',
-    contextWindow: 65536,
+    baseUrl: 'https://api.deepseek.com',
+    // 2026-11 核实：`deepseek-chat` 已不是文档中的模型名，当前是 `deepseek-flash`
+    // （老名字 `deepseek-v4-flash` 仍被接受但已退役）。模型名会变，接入前请对照官方定价页。
+    model: 'deepseek-flash',
+    // 文档标称 1M。这里按标称值填，实际用多少由配置里的 llm.contextWindow 决定——
+    // 预设只描述「这个模型最多能装多少」，工程上愿意用多少是另一回事。
+    contextWindow: 1_000_000,
   },
   openai: {
     name: 'openai',
