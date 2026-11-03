@@ -172,6 +172,18 @@ export function findEnclosingRegion(lines: readonly string[], targetLine: number
   return best;
 }
 
+/**
+ * 列出文件里的所有函数区域。
+ *
+ * 供巡检的复杂度统计使用。和 {@link findEnclosingRegion} 共用同一套启发式，
+ * 这样「改动审查里认得的函数」和「巡检里统计的函数」是同一批，不会出现两套口径。
+ */
+export function listFunctions(lines: readonly string[]): Region[] {
+  const regions = braceRegions(lines);
+  const pool = regions.length > 0 ? regions : indentRegions(lines);
+  return pool.filter((region) => region.name !== '(anonymous)');
+}
+
 /** 把改动行所属的函数名填进 DiffLine.enclosingSymbol。取不到内容的行保持 null。 */
 export function annotateEnclosingSymbols(file: DiffFile, content: string | null): DiffFile {
   if (content === null) return file;
