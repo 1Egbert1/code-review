@@ -37,7 +37,8 @@ import {
 import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
 import { computeCost } from './cost/pricing.js';
-import { BUILTIN_RULES, renderRuleBlock, selectRules } from './reviewers/rules/library.js';
+import { BUILTIN_RULES } from './reviewers/rules/index.js';
+import { renderRuleBlock, selectRules } from './reviewers/rules/library.js';
 import { routeModel } from './routing/model-route.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
