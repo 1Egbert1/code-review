@@ -2,14 +2,14 @@
 
 本项目的审查规则全部为**自行撰写**，不复制任何厂商文档原文。
 
-| 规则 | 来源 | 授权 | 说明 |
-| --- | --- | --- | --- |
-| `await-async-calls` | 本项目 | own | 异步调用必须被等待或显式忽略 |
-| `early-return` | 本项目 | own | 优先早返回，减少嵌套 |
-| `no-empty-catch` | 本项目 | own | 异常不得静默吞掉 |
-| `explicit-any` | 本项目 | own | 禁止用 any 逃避类型 |
-| `test-case-focus` | 本项目 | own | 一个用例只验证一件事 |
-| `api-boundary-validation` | 本项目 | own | 接口边界必须校验入参 |
+| 规则                      | 来源   | 授权 | 说明                         |
+| ------------------------- | ------ | ---- | ---------------------------- |
+| `await-async-calls`       | 本项目 | own  | 异步调用必须被等待或显式忽略 |
+| `early-return`            | 本项目 | own  | 优先早返回，减少嵌套         |
+| `no-empty-catch`          | 本项目 | own  | 异常不得静默吞掉             |
+| `explicit-any`            | 本项目 | own  | 禁止用 any 逃避类型          |
+| `test-case-focus`         | 本项目 | own  | 一个用例只验证一件事         |
+| `api-boundary-validation` | 本项目 | own  | 接口边界必须校验入参         |
 
 ## 引用外部规范时的规矩
 

@@ -169,22 +169,18 @@ export function renderReport(report: InspectionReport, options: RenderReportOpti
   if (blockers.length === 0) {
     blocks.push('## 必须先处理\n\n本轮没有发现需要立即处理的问题。');
   } else {
-    blocks.push(
-      [
-        '## 必须先处理',
-        '',
-        ...blockers
-          .slice(0, maxListed)
-          .map((finding, index) =>
-            [
-              `### ${String(index + 1)}. ${finding.title}`,
-              `${location(finding)} · ${SEVERITY_LABEL[finding.severity]} · ${finding.category}`,
-              '',
-              finding.body,
-            ].join('\n'),
-          ),
-      ].join('\n\n'),
-    );
+    const entries = blockers
+      .slice(0, maxListed)
+      .map((finding, index) =>
+        [
+          `### ${String(index + 1)}. ${finding.title}`,
+          `${location(finding)} · ${SEVERITY_LABEL[finding.severity]} · ${finding.category}`,
+          '',
+          finding.body,
+        ].join('\n'),
+      );
+    // 标题与第一条之间只留一个空行：多一行渲染出来就是一块突兀的空白
+    blocks.push(['## 必须先处理', ...entries].join('\n\n'));
   }
 
   if (suggestions.length > 0) {

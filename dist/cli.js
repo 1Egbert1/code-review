@@ -20437,20 +20437,15 @@ function renderReport(report, options = {}) {
   if (blockers.length === 0) {
     blocks.push("## \u5FC5\u987B\u5148\u5904\u7406\n\n\u672C\u8F6E\u6CA1\u6709\u53D1\u73B0\u9700\u8981\u7ACB\u5373\u5904\u7406\u7684\u95EE\u9898\u3002");
   } else {
-    blocks.push(
-      [
-        "## \u5FC5\u987B\u5148\u5904\u7406",
+    const entries = blockers.slice(0, maxListed).map(
+      (finding, index) => [
+        `### ${String(index + 1)}. ${finding.title}`,
+        `${location(finding)} \xB7 ${SEVERITY_LABEL2[finding.severity]} \xB7 ${finding.category}`,
         "",
-        ...blockers.slice(0, maxListed).map(
-          (finding, index) => [
-            `### ${String(index + 1)}. ${finding.title}`,
-            `${location(finding)} \xB7 ${SEVERITY_LABEL2[finding.severity]} \xB7 ${finding.category}`,
-            "",
-            finding.body
-          ].join("\n")
-        )
-      ].join("\n\n")
+        finding.body
+      ].join("\n")
     );
+    blocks.push(["## \u5FC5\u987B\u5148\u5904\u7406", ...entries].join("\n\n"));
   }
   if (suggestions.length > 0) {
     const rows = suggestions.slice(0, maxListed).map((finding) => `| ${location(finding)} | ${finding.title} | ${finding.category} |`);
