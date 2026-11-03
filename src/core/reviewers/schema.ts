@@ -166,6 +166,7 @@ export function validateRawFindings(payload: unknown, spec: ReviewerSpec): Valid
       line: line as number,
       side: side as 'new' | 'old',
       severity: finalSeverity,
+      category: category as string,
       title: title.slice(0, 60),
       body: body as string,
       evidence: evidence as string,

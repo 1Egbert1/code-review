@@ -111,6 +111,26 @@ export interface GitHubWriteGateway {
    * 网关不具备该能力时**省略这个方法**，发送层会据此降级为编辑评论。
    */
   resolveThread?(ref: PullRequestRef, commentId: string): Promise<void>;
+
+  /** 写一次检查运行，返回其 id。这是「阻止合并」唯一的技术落点。 */
+  createCheckRun(
+    ref: PullRequestRef,
+    input: {
+      readonly name: string;
+      readonly headSha: string;
+      readonly conclusion: 'success' | 'failure' | 'neutral';
+      readonly title: string;
+      readonly summary: string;
+      readonly annotations: readonly {
+        readonly path: string;
+        readonly startLine: number;
+        readonly endLine: number;
+        readonly level: 'notice' | 'warning' | 'failure';
+        readonly title: string;
+        readonly message: string;
+      }[];
+    },
+  ): Promise<string>;
 }
 
 /** 读写齐全的网关。真实实现同时满足两个接口。 */
@@ -298,6 +318,32 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
         comment_id: Number(commentId),
         body,
       });
+    },
+
+    async createCheckRun(ref, input) {
+      const response = await octokit.rest.checks.create({
+        owner: ref.owner,
+        repo: ref.repo,
+        name: input.name,
+        head_sha: input.headSha,
+        status: 'completed',
+        conclusion: input.conclusion,
+        output: {
+          title: input.title,
+          summary: input.summary,
+          // 平台限制单次注解条数，超了整次请求会失败
+          annotations: input.annotations.slice(0, 50).map((annotation) => ({
+            path: annotation.path,
+            start_line: annotation.startLine,
+            end_line: annotation.endLine,
+            annotation_level: annotation.level,
+            title: annotation.title,
+            message: annotation.message,
+          })),
+        },
+      });
+
+      return String(response.data.id);
     },
 
     async resolveThread(ref, commentId) {

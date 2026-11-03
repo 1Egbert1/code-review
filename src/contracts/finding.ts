@@ -45,6 +45,11 @@ export interface RawFinding {
   /** 这个行号指的是哪一侧：new 为改动后，old 为改动前 */
   readonly side: 'new' | 'old';
   readonly severity: Severity;
+  /**
+   * 问题类别，取值由维度决定（如 authz / null-safety）。
+   * 门禁按类别判断「这类问题该不该挡人」，报告也按它分组，所以必须一路带下去。
+   */
+  readonly category: string;
   /** 简短标题，不超过 60 字 */
   readonly title: string;
   /** 必须写清「什么条件下出问题 + 后果」 */
@@ -66,6 +71,8 @@ export interface Finding {
   /** 位置来自哪条路径，用于度量定位质量 */
   readonly positionOrigin: PositionOrigin;
   readonly severity: Severity;
+  /** 问题类别，由审核员的字段规范限定取值 */
+  readonly category: string;
   readonly title: string;
   readonly body: string;
   readonly evidence: string;

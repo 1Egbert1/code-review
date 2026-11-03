@@ -134,6 +134,14 @@ export interface ReviewWarning {
   readonly target: string | null;
 }
 
+/** 门禁结论摘要。完整判定过程在 gate 模块，这里只放结果需要展示的部分。 */
+export interface GateSummary {
+  readonly conclusion: 'success' | 'failure' | 'neutral';
+  readonly blockers: number;
+  readonly exempted: number;
+  readonly title: string;
+}
+
 /** 一轮审查的完整结果。 */
 export interface ReviewResult {
   /** 全部通过校验的问题项；summaryOnly 是它的子集，不是另一份数据 */
@@ -146,6 +154,8 @@ export interface ReviewResult {
   readonly coverage: CoverageSummary;
   readonly usage: Usage;
   readonly warnings: readonly ReviewWarning[];
+  /** 门禁未启用时为 null */
+  readonly gate: GateSummary | null;
   /** ISO 时间戳 */
   readonly startedAt: string;
   /** ISO 时间戳 */

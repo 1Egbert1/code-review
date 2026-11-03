@@ -8750,7 +8750,26 @@ var DEFAULT_CONFIG = {
   gate: {
     enabled: false,
     blockingSeverity: "blocker",
-    blockingCategories: ["security", "crash", "data-loss", "resource-leak"],
+    // 必须是各维度 schema 里的真实类别名。写抽象名（如 'crash'）会让门禁永远不触发——
+    // 这条错很难发现：配置校验只查类型，不查枚举是否对得上维度。
+    blockingCategories: [
+      // 正确性：会崩、会算错、会卡死的那几类
+      "null-safety",
+      "logic",
+      "concurrency",
+      "error-handling",
+      "resource",
+      "boundary",
+      // 安全性：全部
+      "injection",
+      "authz",
+      "secret-exposure",
+      "unsafe-deserialization",
+      "path-traversal",
+      "ssrf",
+      "crypto-misuse",
+      "frontend-exposure"
+    ],
     confidenceThreshold: 0.8,
     exemptionStore: "issue-comment"
   },
@@ -9742,6 +9761,7 @@ function makeFinding(change, sites, problem) {
     line: change.line,
     side: change.side,
     severity: "major",
+    category: "logic",
     title: `${change.name}() \u7684\u8C03\u7528\u65B9\u672A\u540C\u6B65\u4FEE\u6539`,
     body: [
       `${problem}\u3002`,
@@ -10624,6 +10644,7 @@ function validateRawFindings(payload, spec) {
       line,
       side,
       severity: finalSeverity,
+      category,
       title: title.slice(0, 60),
       body,
       evidence,
@@ -11464,6 +11485,7 @@ function verifyFindings(items, options) {
       anchor: located.anchor,
       positionOrigin: located.origin,
       severity: raw.severity,
+      category: raw.category,
       title: raw.title,
       body: raw.body,
       evidence: raw.evidence,
@@ -11488,6 +11510,65 @@ function verifyFindings(items, options) {
     summaryOnly: findings.filter((finding) => !inlineSet.has(finding.fingerprint)),
     rejections
   };
+}
+
+// src/core/gate/gate.ts
+function severityRank2(severity) {
+  return ["blocker", "major", "minor", "nit"].indexOf(severity);
+}
+function decideGate(finding, config, isRuleFact, exemptions) {
+  if (!config.enabled) return { block: false, reason: "\u95E8\u7981\u672A\u542F\u7528" };
+  if (severityRank2(finding.severity) > severityRank2(config.blockingSeverity)) {
+    return { block: false, reason: `\u4E25\u91CD\u5EA6 ${finding.severity} \u672A\u8FBE\u963B\u585E\u95E8\u69DB` };
+  }
+  if (!config.blockingCategories.includes(finding.category)) {
+    return { block: false, reason: `\u7C7B\u522B\u4E0D\u5728\u5141\u8BB8\u963B\u585E\u7684\u8303\u56F4\uFF08${finding.category}\uFF09` };
+  }
+  if (!isRuleFact && finding.confidence < config.confidenceThreshold) {
+    return {
+      block: false,
+      reason: `\u7F6E\u4FE1\u5EA6 ${finding.confidence.toFixed(2)} \u4F4E\u4E8E\u95E8\u69DB ${String(config.confidenceThreshold)}`
+    };
+  }
+  if (exemptions.some((exemption) => exemption.fingerprint === finding.fingerprint)) {
+    return { block: false, reason: "\u5DF2\u8C41\u514D" };
+  }
+  return { block: true, reason: `\u4E25\u91CD\u5EA6 ${finding.severity} + \u7C7B\u522B ${finding.category}` };
+}
+function evaluateGate(input) {
+  if (!input.config.enabled) {
+    return { conclusion: "neutral", blockers: [], exempted: [], demoted: [] };
+  }
+  const blockers = [];
+  const exempted = [];
+  const demoted = [];
+  for (const finding of input.findings) {
+    const ruleFact = input.ruleFingerprints?.has(finding.fingerprint) ?? false;
+    const decision = decideGate(finding, input.config, ruleFact, input.exemptions);
+    if (decision.block) {
+      blockers.push(finding);
+      continue;
+    }
+    if (decision.reason === "\u5DF2\u8C41\u514D") {
+      exempted.push(finding);
+      continue;
+    }
+    if (severityRank2(finding.severity) <= severityRank2(input.config.blockingSeverity)) {
+      demoted.push({ finding, reason: decision.reason ?? "\u672A\u8FBE\u963B\u585E\u6761\u4EF6" });
+    }
+  }
+  return {
+    conclusion: blockers.length > 0 ? "failure" : "success",
+    blockers,
+    exempted,
+    demoted
+  };
+}
+function gateTitle(outcome) {
+  if (outcome.blockers.length === 0) {
+    return outcome.exempted.length > 0 ? `\u901A\u8FC7\uFF08${String(outcome.exempted.length)} \u6761\u5DF2\u8C41\u514D\uFF09` : "\u901A\u8FC7";
+  }
+  return `\u963B\u6B62\u5408\u5E76\uFF1A${String(outcome.blockers.length)} \u4E2A\u81F4\u547D\u95EE\u9898`;
 }
 
 // src/core/engine.ts
@@ -11765,6 +11846,11 @@ async function runReview(request2, deps) {
     rejectedCount: allRejections.length,
     ...deps.config.review.checkpoint ? { checkpoint: buildCheckpointState(diff, configHash, promptHash) } : {}
   });
+  const gateOutcome = deps.config.gate.enabled ? evaluateGate({
+    findings: verified.findings,
+    config: deps.config.gate,
+    exemptions: deps.exemptions ?? []
+  }) : null;
   if (deps.port !== null && deps.port !== void 0 && !request2.dryRun) {
     const outcome = await publish({
       port: deps.port,
@@ -11781,6 +11867,32 @@ async function runReview(request2, deps) {
       warnings.push({
         kind: "other",
         message: `${failure.action} \u5931\u8D25\uFF1A${failure.detail}`,
+        target: null
+      });
+    }
+  }
+  if (gateOutcome !== null && deps.checkPort !== void 0 && deps.checkPort !== null && !request2.dryRun) {
+    const annotations = gateOutcome.blockers.slice(0, 50).map((finding) => ({
+      path: finding.anchor.file,
+      // 注解要求起止行都存在；删除行用旧侧行号，平台接受
+      startLine: finding.anchor.newLine ?? finding.anchor.oldLine ?? 1,
+      endLine: finding.anchor.newLine ?? finding.anchor.oldLine ?? 1,
+      level: "failure",
+      title: finding.title,
+      message: finding.body
+    }));
+    const result = await deps.checkPort.publish({
+      name: "AI \u4EE3\u7801\u5BA1\u67E5",
+      headSha: diff.headSha,
+      conclusion: gateOutcome.conclusion,
+      title: gateTitle(gateOutcome),
+      summary: gateOutcome.blockers.map((finding) => `- ${finding.anchor.file}: ${finding.title}`).join("\n"),
+      annotations
+    });
+    if (!result.ok) {
+      warnings.push({
+        kind: "permission",
+        message: `\u5199\u68C0\u67E5\u8FD0\u884C\u5931\u8D25\uFF0C\u672C\u8F6E\u4E0D\u4F1A\u963B\u6B62\u5408\u5E76\uFF1A${result.failure.message}`,
         target: null
       });
     }
@@ -11806,6 +11918,12 @@ async function runReview(request2, deps) {
       truncatedByBudget: budgetExhausted
     },
     warnings,
+    gate: gateOutcome === null ? null : {
+      conclusion: gateOutcome.conclusion,
+      blockers: gateOutcome.blockers.length,
+      exempted: gateOutcome.exempted.length,
+      title: gateTitle(gateOutcome)
+    },
     startedAt,
     finishedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
@@ -19480,6 +19598,30 @@ function createGitHubGateway(token) {
         comment_id: Number(commentId),
         body
       });
+    },
+    async createCheckRun(ref, input) {
+      const response = await octokit.rest.checks.create({
+        owner: ref.owner,
+        repo: ref.repo,
+        name: input.name,
+        head_sha: input.headSha,
+        status: "completed",
+        conclusion: input.conclusion,
+        output: {
+          title: input.title,
+          summary: input.summary,
+          // 平台限制单次注解条数，超了整次请求会失败
+          annotations: input.annotations.slice(0, 50).map((annotation) => ({
+            path: annotation.path,
+            start_line: annotation.startLine,
+            end_line: annotation.endLine,
+            annotation_level: annotation.level,
+            title: annotation.title,
+            message: annotation.message
+          }))
+        }
+      });
+      return String(response.data.id);
     },
     async resolveThread(ref, commentId) {
       const comment = await octokit.rest.pulls.getReviewComment({

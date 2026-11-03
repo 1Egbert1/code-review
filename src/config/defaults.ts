@@ -78,7 +78,26 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   gate: {
     enabled: false,
     blockingSeverity: 'blocker',
-    blockingCategories: ['security', 'crash', 'data-loss', 'resource-leak'],
+    // 必须是各维度 schema 里的真实类别名。写抽象名（如 'crash'）会让门禁永远不触发——
+    // 这条错很难发现：配置校验只查类型，不查枚举是否对得上维度。
+    blockingCategories: [
+      // 正确性：会崩、会算错、会卡死的那几类
+      'null-safety',
+      'logic',
+      'concurrency',
+      'error-handling',
+      'resource',
+      'boundary',
+      // 安全性：全部
+      'injection',
+      'authz',
+      'secret-exposure',
+      'unsafe-deserialization',
+      'path-traversal',
+      'ssrf',
+      'crypto-misuse',
+      'frontend-exposure',
+    ],
     confidenceThreshold: 0.8,
     exemptionStore: 'issue-comment',
   },

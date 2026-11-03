@@ -61,3 +61,33 @@ export interface CommentPort {
     markerText: string,
   ): Promise<{ readonly commentId: string; readonly body: string } | null>;
 }
+
+/** 一条检查注解（显示在具体代码行上的提示）。 */
+export interface CheckAnnotation {
+  readonly path: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly level: 'notice' | 'warning' | 'failure';
+  readonly title: string;
+  readonly message: string;
+}
+
+export interface CheckRunInput {
+  readonly name: string;
+  readonly headSha: string;
+  readonly conclusion: 'success' | 'failure' | 'neutral';
+  readonly title: string;
+  readonly summary: string;
+  readonly annotations: readonly CheckAnnotation[];
+}
+
+/**
+ * 检查运行端口。
+ *
+ * 这是「阻止合并」唯一的技术落点：评论只是通知，不会让合并按钮变红；
+ * 只有把结论写成一次检查运行，并在分支保护里设为必需，才真的挡得住。
+ */
+export interface CheckPort {
+  readonly kind: string;
+  publish(input: CheckRunInput): Promise<WriteResult>;
+}

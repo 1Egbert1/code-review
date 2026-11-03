@@ -48,7 +48,9 @@ import { runReviewer, sumUsage } from './reviewers/run.js';
 import type { ReviewerRunResult } from './reviewers/run.js';
 import type { ReviewerInput, ReviewerSpec } from './reviewers/schema.js';
 import { verifyFindings } from './verify/chain.js';
-import type { CommentPort } from '../platforms/types.js';
+import { evaluateGate, gateTitle } from './gate/gate.js';
+import type { Exemption } from './gate/gate.js';
+import type { CheckPort, CommentPort } from '../platforms/types.js';
 import type { LlmClient } from '../providers/types.js';
 
 const SPECS: Readonly<Record<ReviewerId, ReviewerSpec>> = {
@@ -64,6 +66,10 @@ export interface EngineDeps {
   readonly fetchSnapshot: (request: ReviewRequest) => Promise<DiffSnapshot>;
   /** 写评论端口；只打印模式下传 null */
   readonly port?: CommentPort | null;
+  /** 检查运行端口；不传则不写门禁结论 */
+  readonly checkPort?: CheckPort | null;
+  /** 已记录的豁免。豁免绑定指纹，代码一改就自动失效 */
+  readonly exemptions?: readonly Exemption[];
   readonly now?: () => string;
   /** 逐条进度回调，命令行用来打印过程 */
   readonly onProgress?: (message: string) => void;
@@ -418,6 +424,14 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
       : {}),
   });
 
+  const gateOutcome = deps.config.gate.enabled
+    ? evaluateGate({
+        findings: verified.findings,
+        config: deps.config.gate,
+        exemptions: deps.exemptions ?? [],
+      })
+    : null;
+
   // ── 发 ────────────────────────────────────────────────────────────────
   if (deps.port !== null && deps.port !== undefined && !request.dryRun) {
     const outcome = await publish({
@@ -436,6 +450,42 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
       warnings.push({
         kind: 'other',
         message: `${failure.action} 失败：${failure.detail}`,
+        target: null,
+      });
+    }
+  }
+
+  if (
+    gateOutcome !== null &&
+    deps.checkPort !== undefined &&
+    deps.checkPort !== null &&
+    !request.dryRun
+  ) {
+    const annotations = gateOutcome.blockers.slice(0, 50).map((finding) => ({
+      path: finding.anchor.file,
+      // 注解要求起止行都存在；删除行用旧侧行号，平台接受
+      startLine: finding.anchor.newLine ?? finding.anchor.oldLine ?? 1,
+      endLine: finding.anchor.newLine ?? finding.anchor.oldLine ?? 1,
+      level: 'failure' as const,
+      title: finding.title,
+      message: finding.body,
+    }));
+
+    const result = await deps.checkPort.publish({
+      name: 'AI 代码审查',
+      headSha: diff.headSha,
+      conclusion: gateOutcome.conclusion,
+      title: gateTitle(gateOutcome),
+      summary: gateOutcome.blockers
+        .map((finding) => `- ${finding.anchor.file}: ${finding.title}`)
+        .join('\n'),
+      annotations,
+    });
+
+    if (!result.ok) {
+      warnings.push({
+        kind: 'permission',
+        message: `写检查运行失败，本轮不会阻止合并：${result.failure.message}`,
         target: null,
       });
     }
@@ -465,6 +515,15 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
       truncatedByBudget: budgetExhausted,
     },
     warnings,
+    gate:
+      gateOutcome === null
+        ? null
+        : {
+            conclusion: gateOutcome.conclusion,
+            blockers: gateOutcome.blockers.length,
+            exempted: gateOutcome.exempted.length,
+            title: gateTitle(gateOutcome),
+          },
     startedAt,
     finishedAt: new Date().toISOString(),
   };

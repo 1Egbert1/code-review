@@ -19,6 +19,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     anchor,
     positionOrigin: 'model-line',
     severity: 'major',
+    category: 'null-safety',
     title: '空值未判断',
     body: 'b',
     evidence: 'e',

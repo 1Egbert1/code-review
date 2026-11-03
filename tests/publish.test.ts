@@ -14,6 +14,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     anchor: { file: 'src/a.ts', oldPath: null, kind: 'added', newLine: 10, oldLine: null },
     positionOrigin: 'model-line',
     severity: 'major',
+    category: 'null-safety',
     title: '空值未判断',
     body: 'v 可能是 null，读取属性时崩溃',
     evidence: 'return v.y;',

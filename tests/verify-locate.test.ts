@@ -37,6 +37,7 @@ function raw(overrides: Record<string, unknown> = {}) {
     line: 3,
     side: 'new' as const,
     severity: 'major' as const,
+    category: 'null-safety',
     title: '空值未判断',
     body: 'v 可能为 null',
     evidence: 'return v.y;',

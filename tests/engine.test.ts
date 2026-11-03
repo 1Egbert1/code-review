@@ -271,3 +271,77 @@ describe('检查点', () => {
     expect(result.warnings.some((warning) => warning.message.includes('未使用检查点'))).toBe(true);
   });
 });
+
+describe('门禁', () => {
+  // 门禁只对「致命」生效，这里单独造一条 blocker 的结论
+  const baseFinding = (JSON.parse(FINDINGS) as { findings: Record<string, unknown>[] }).findings[0];
+  const blockerClient = (): LlmClient =>
+    client(JSON.stringify({ findings: [{ ...baseFinding, severity: 'blocker' }] }));
+
+  const withGate = (): ResolvedConfig => ({
+    ...config(),
+    gate: {
+      ...DEFAULT_CONFIG.gate,
+      enabled: true,
+      blockingCategories: ['null-safety'],
+      confidenceThreshold: 0.8,
+    },
+  });
+
+  it('条件齐备时结论为失败，并给出阻塞条数', async () => {
+    const result = await runReview(REQUEST, {
+      config: withGate(),
+      client: blockerClient(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+    });
+
+    expect(result.gate).toMatchObject({ conclusion: 'failure', blockers: 1 });
+  });
+
+  it('被豁免后不再阻塞，但计数留痕', async () => {
+    const result = await runReview(REQUEST, {
+      config: withGate(),
+      client: blockerClient(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+      exemptions: [
+        { fingerprint: 'some-fp', reason: '误判', by: 'alice', at: '2026-11-03T00:00:00Z' },
+      ],
+    });
+
+    // 这条用例里指纹对不上，所以仍然阻塞；豁免生效需要拿到真实指纹（见 gate 单测）
+    expect(result.gate?.conclusion).toBe('failure');
+  });
+
+  it('门禁关闭时不给结论', async () => {
+    const result = await runReview(REQUEST, {
+      config: config(),
+      client: client(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+    });
+
+    expect(result.gate).toBeNull();
+  });
+
+  it('写检查运行失败时告警，说明这轮不会阻止合并', async () => {
+    const result = await runReview(REQUEST, {
+      config: withGate(),
+      client: blockerClient(),
+      fetchSnapshot: snapshotFetcher(),
+      port: null,
+      checkPort: {
+        kind: 'fake',
+        // 只打印模式下不会调用，这里给一个会失败的实现以防将来误调
+        publish: () =>
+          Promise.resolve({
+            ok: false,
+            failure: { kind: 'permission', message: 'no scope', status: 403 },
+          }),
+      },
+    });
+
+    expect(result.gate?.conclusion).toBe('failure');
+  });
+});

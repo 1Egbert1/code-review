@@ -225,6 +225,7 @@ function makeFinding(
     line: change.line,
     side: change.side,
     severity: 'major',
+    category: 'logic',
     title: `${change.name}() 的调用方未同步修改`,
     body: [
       `${problem}。`,

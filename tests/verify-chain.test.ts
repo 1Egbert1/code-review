@@ -33,6 +33,7 @@ function raw(overrides: Partial<RawFinding> = {}): RawFinding {
     line: 3,
     side: 'new',
     severity: 'major',
+    category: 'null-safety',
     title: '空值未判断',
     body: 'v 可能为 null',
     evidence: 'return v.y;',

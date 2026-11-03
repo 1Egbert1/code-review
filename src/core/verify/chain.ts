@@ -110,6 +110,7 @@ export function verifyFindings(
       anchor: located.anchor,
       positionOrigin: located.origin,
       severity: raw.severity,
+      category: raw.category,
       title: raw.title,
       body: raw.body,
       evidence: raw.evidence,
