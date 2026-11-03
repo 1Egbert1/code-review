@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -69,10 +70,12 @@ describe('命令行入口', () => {
     expect(box.stdout()).toContain('未配置单价');
   });
 
-  it('inspect 尚未实现时返回 3', async () => {
+  it('inspect 已实现：空目录也能出报告', async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    const root = await mkdtemp(join(tmpdir(), 'acr-cli-inspect-'));
     const box = harness();
-    expect(await main(['inspect'], box.deps)).toBe(3);
-    expect(box.stderr()).toContain('尚未实现');
+    expect(await main(['inspect'], { ...box.deps, cwd: root })).toBe(0);
+    expect(box.stdout()).toContain('代码巡检报告');
   });
 
   it('--help 子命令级别也返回用法', async () => {

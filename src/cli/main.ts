@@ -24,6 +24,9 @@ import { createGitHubGateway } from '../platforms/github/client.js';
 import { fetchSnapshot } from '../platforms/github/fetch.js';
 import { createOpenAiCompatClient } from '../providers/openai-compat.js';
 import { compareBaselines, isBaselineSnapshot } from '../core/eval/baseline.js';
+import { renderReport } from '../core/inspection/report.js';
+import { runInspection } from '../core/inspection/run.js';
+import { collectSourceFiles, readOptional } from './walk.js';
 import { formatComparison, formatStats } from './stats.js';
 
 const COMMANDS = ['review', 'dry-run', 'inspect', 'cost', 'eval'] as const;
@@ -321,8 +324,49 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
       return comparison.comparable ? 0 : 1;
     }
 
-    // inspect 在后续任务包实现。现在明确告知，而不是静默成功。
-    stderr(`子命令 ${first} 尚未实现\n`);
+    if (first === 'inspect') {
+      const loaded = await loadConfig(resolved.cwd);
+      if (!loaded.ok) {
+        for (const error of loaded.errors) stderr(`${error.path}：${error.message}\n`);
+        return 1;
+      }
+
+      const files = await collectSourceFiles(resolved.cwd);
+
+      // package.json 单独补进来：依赖维度要用，但它不是「源码文件」
+      const manifest = await readOptional(resolved.cwd, 'package.json');
+      const allFiles = manifest === null ? files : [...files, manifest];
+
+      const coverageText = flags['coverage'];
+      const coverage =
+        coverageText === undefined || coverageText === '' ? null : Number(coverageText);
+      if (coverage !== null && !Number.isFinite(coverage)) {
+        stderr('--coverage 必须是数字（百分比）\n');
+        return 2;
+      }
+
+      const report = runInspection({
+        repository: resolved.env['GITHUB_REPOSITORY'] ?? 'local',
+        commitSha: resolved.env['GITHUB_SHA'] ?? 'unknown',
+        files: allFiles,
+        config: loaded.config.inspection,
+        coveragePercent: coverage,
+      });
+
+      const markdown = renderReport(report);
+      const outPath = flags['out'];
+      if (outPath !== undefined && outPath !== '') {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(outPath, markdown, 'utf8');
+        stdout(`报告已写入 ${outPath}\n`);
+      } else {
+        stdout(markdown);
+      }
+      return 0;
+    }
+
+    // 所有已登记的子命令都在上面处理完了；走到这里说明登记表与实现脱节
+    stderr('该子命令尚未接入实现\n');
     return 3;
   } catch (error) {
     stderr(`运行失败：${error instanceof Error ? error.message : String(error)}\n`);

@@ -8686,7 +8686,7 @@ var require_light = __commonJS({
 });
 
 // src/cli/main.ts
-import { readFile as readFile2 } from "node:fs/promises";
+import { readFile as readFile3 } from "node:fs/promises";
 
 // src/config/load.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -9458,6 +9458,11 @@ function findEnclosingRegion(lines, targetLine) {
     if (best === null || region.startLine > best.startLine) best = region;
   }
   return best;
+}
+function listFunctions(lines) {
+  const regions = braceRegions(lines);
+  const pool = regions.length > 0 ? regions : indentRegions(lines);
+  return pool.filter((region) => region.name !== "(anonymous)");
 }
 function renderDiffLine(line) {
   const mark = line.anchor.kind === "added" ? "+" : line.anchor.kind === "removed" ? "-" : " ";
@@ -11596,8 +11601,8 @@ function verifyFindings(items, options) {
     });
   }
   const inlineCandidates = findings.filter((finding) => finding.scope === "changed").sort((a, b) => {
-    const bySeverity = severityRank(a.severity) - severityRank(b.severity);
-    if (bySeverity !== 0) return bySeverity;
+    const bySeverity2 = severityRank(a.severity) - severityRank(b.severity);
+    if (bySeverity2 !== 0) return bySeverity2;
     return b.confidence - a.confidence;
   });
   const inline = inlineCandidates.slice(0, Math.max(0, options.maxInline));
@@ -20221,6 +20226,769 @@ function isBaselineSnapshot(value) {
   return record["version"] === 1 && typeof record["label"] === "string" && typeof record["datasetHash"] === "string" && typeof record["model"] === "string" && typeof record["metrics"] === "object" && record["metrics"] !== null;
 }
 
+// src/core/inspection/report.ts
+var DIMENSION_LABEL = {
+  complexity: "\u590D\u6742\u5EA6",
+  duplication: "\u91CD\u590D\u5EA6",
+  dependency: "\u4F9D\u8D56\u5065\u5EB7",
+  "type-safety": "\u7C7B\u578B\u5B89\u5168",
+  test: "\u6D4B\u8BD5"
+};
+var SEVERITY_LABEL2 = {
+  blocker: "\u4E25\u91CD",
+  major: "\u4E3B\u8981",
+  minor: "\u6B21\u8981",
+  nit: "\u63D0\u793A"
+};
+function location(finding) {
+  const line = finding.anchor.kind === "removed" ? finding.anchor.oldLine : finding.anchor.newLine;
+  return `\`${finding.anchor.file}${line === null ? "" : `:${String(line)}`}\``;
+}
+function bySeverity(findings, severity) {
+  return findings.filter((finding) => finding.severity === severity);
+}
+function scoreSection(report) {
+  const blocks = ["## \u5206\u6570\u660E\u7EC6\uFF08\u53EF\u6838\u5BF9\uFF09"];
+  const header = ["| \u7EF4\u5EA6 | \u5F97\u5206 | \u6263\u5206\u660E\u7EC6 |", "| --- | --- | --- |"];
+  const rows = report.breakdown.map((item) => {
+    const detail = item.items.filter((entry) => entry.deduction > 0).map(
+      (entry) => `${entry.label} ${entry.actual}\uFF08\u9608\u503C ${entry.threshold}\uFF09\u2212${String(entry.deduction)}`
+    ).join("<br>");
+    return `| ${DIMENSION_LABEL[item.dimension]} | ${String(item.score)} / ${String(item.maxScore)} | ${detail === "" ? "\u2014" : detail} |`;
+  });
+  blocks.push([...header, ...rows].join("\n"));
+  blocks.push(
+    `> \u603B\u5206 = \u03A3\uFF08\u5404\u7EF4\u5F97\u5206 \xF7 \u6EE1\u5206 \xD7 \u6743\u91CD\uFF09\u3002\u5F53\u524D\u6743\u91CD\uFF1A${report.breakdown.map((item) => `${DIMENSION_LABEL[item.dimension]} ${String(item.weight)}%`).join("\u3001")}`
+  );
+  return blocks;
+}
+function trendSection(report, previous) {
+  if (previous === null) return [];
+  const delta = report.totalScore - previous.totalScore;
+  const arrow = delta === 0 ? "\u6301\u5E73" : delta > 0 ? `\u2191${String(delta)}` : `\u2193${String(-delta)}`;
+  const changed = report.breakdown.map((item) => ({
+    dimension: item.dimension,
+    diff: item.score - (previous.scores[item.dimension] ?? item.score)
+  })).filter((entry) => entry.diff !== 0).sort((a, b) => a.diff - b.diff).map(
+    (entry) => `${DIMENSION_LABEL[entry.dimension]} ${entry.diff > 0 ? "+" : "\u2212"}${String(Math.abs(entry.diff))}`
+  );
+  const lines = [
+    `## \u4E0E\u4E0A\u6B21\u5BF9\u6BD4`,
+    "",
+    `\u603B\u5206 ${String(previous.totalScore)} \u2192 ${String(report.totalScore)}\uFF08${arrow}\uFF09`
+  ];
+  if (changed.length > 0) lines.push("", `\u53D8\u5316\u6765\u81EA\uFF1A${changed.join("\u3001")}`);
+  if (report.regressions.length > 0)
+    lines.push("", `\u65B0\u589E\u6216\u6076\u5316 ${String(report.regressions.length)} \u9879`);
+  if (report.resolved.length > 0) lines.push(`\u5DF2\u4FEE\u590D ${String(report.resolved.length)} \u9879`);
+  return lines;
+}
+function actionsSection(report, explicit) {
+  if (explicit !== void 0 && explicit.length > 0) {
+    return [
+      "## \u8FD9\u4E2A\u6708\u6700\u8BE5\u505A\u7684\u4E09\u4EF6\u4E8B",
+      "",
+      ...explicit.map((text2, index) => `${String(index + 1)}. ${text2}`)
+    ];
+  }
+  const ranked = report.breakdown.map((item) => ({
+    dimension: item.dimension,
+    lost: item.maxScore - item.score,
+    worst: [...item.items].sort((a, b) => b.deduction - a.deduction)[0]
+  })).filter((entry) => entry.lost > 0).sort((a, b) => b.lost - a.lost).slice(0, 3);
+  if (ranked.length === 0)
+    return ["## \u8FD9\u4E2A\u6708\u6700\u8BE5\u505A\u7684\u4E09\u4EF6\u4E8B", "", "\u5404\u9879\u6307\u6807\u90FD\u5728\u9608\u503C\u5185\uFF0C\u4FDD\u6301\u73B0\u72B6\u5373\u53EF\u3002"];
+  return [
+    "## \u8FD9\u4E2A\u6708\u6700\u8BE5\u505A\u7684\u4E09\u4EF6\u4E8B",
+    "",
+    ...ranked.map(
+      (entry, index) => `${String(index + 1)}. **${DIMENSION_LABEL[entry.dimension]}**\uFF1A${entry.worst?.label ?? ""} ${entry.worst?.actual ?? ""}\uFF08\u9608\u503C ${entry.worst?.threshold ?? ""}\uFF09`
+    )
+  ];
+}
+function renderReport(report, options = {}) {
+  const blocks = [];
+  const maxListed = options.maxListed ?? 20;
+  const blockers = [
+    ...bySeverity(report.findings, "blocker"),
+    ...bySeverity(report.findings, "major")
+  ];
+  const suggestions = bySeverity(report.findings, "minor");
+  const rest = [...bySeverity(report.findings, "nit")];
+  blocks.push(
+    [
+      `# \u4EE3\u7801\u5DE1\u68C0\u62A5\u544A \xB7 ${report.inspectedAt.slice(0, 10)}`,
+      "",
+      `**\u4ED3\u5E93** ${report.repository} **\u63D0\u4EA4** \`${report.commitSha.slice(0, 7)}\``,
+      `**\u603B\u5206 ${String(report.totalScore)} / 100** **\u95EE\u9898 ${String(report.findings.length)} \u4E2A**\uFF08\u4E25\u91CD ${String(
+        report.counts.blocker
+      )} \xB7 \u4E3B\u8981 ${String(report.counts.major)} \xB7 \u6B21\u8981 ${String(report.counts.minor)}\uFF09`
+    ].join("\n")
+  );
+  if (blockers.length === 0) {
+    blocks.push("## \u5FC5\u987B\u5148\u5904\u7406\n\n\u672C\u8F6E\u6CA1\u6709\u53D1\u73B0\u9700\u8981\u7ACB\u5373\u5904\u7406\u7684\u95EE\u9898\u3002");
+  } else {
+    blocks.push(
+      [
+        "## \u5FC5\u987B\u5148\u5904\u7406",
+        "",
+        ...blockers.slice(0, maxListed).map(
+          (finding, index) => [
+            `### ${String(index + 1)}. ${finding.title}`,
+            `${location(finding)} \xB7 ${SEVERITY_LABEL2[finding.severity]} \xB7 ${finding.category}`,
+            "",
+            finding.body
+          ].join("\n")
+        )
+      ].join("\n\n")
+    );
+  }
+  if (suggestions.length > 0) {
+    const rows = suggestions.slice(0, maxListed).map((finding) => `| ${location(finding)} | ${finding.title} | ${finding.category} |`);
+    blocks.push(
+      [
+        "## \u5EFA\u8BAE\u672C\u6B21\u8FED\u4EE3\u5904\u7406",
+        "",
+        ["| \u4F4D\u7F6E | \u95EE\u9898 | \u7C7B\u522B |", "| --- | --- | --- |", ...rows].join("\n")
+      ].join("\n")
+    );
+  }
+  if (rest.length > 0) {
+    const listed = rest.slice(0, maxListed);
+    blocks.push(
+      [
+        `## \u5176\u4F59\uFF08${String(rest.length)} \u9879\uFF09`,
+        "",
+        "<details>",
+        "<summary>\u5C55\u5F00\u67E5\u770B</summary>",
+        "",
+        ...listed.map((finding) => `- ${location(finding)} ${finding.title}`),
+        ...rest.length > listed.length ? ["", `\u53E6\u6709 ${String(rest.length - listed.length)} \u9879\u672A\u5217\u51FA`] : [],
+        "",
+        "</details>"
+      ].join("\n")
+    );
+  }
+  blocks.push(scoreSection(report).join("\n\n"));
+  blocks.push(trendSection(report, options.previous ?? null).join("\n"));
+  blocks.push(actionsSection(report, options.actions).join("\n"));
+  return blocks.filter((block) => block.trim() !== "").join("\n\n") + "\n";
+}
+
+// src/core/inspection/score.ts
+var DEFAULT_THRESHOLDS = {
+  avgFunctionLines: 40,
+  avgCyclomatic: 10,
+  maxFileLines: 500,
+  complexFunctionCount: 3,
+  duplicationRatio: 0.03,
+  circularDependencies: 0,
+  looseVersionRatio: 0.3,
+  anyDensity: 5,
+  ignoredChecks: 0,
+  testToCodeRatio: 0.6,
+  coveragePercent: 80
+};
+function tiered(value, threshold, unit, cap, per = 1) {
+  if (value <= threshold) return 0;
+  const steps = Math.ceil((value - threshold) / unit);
+  return Math.min(cap, steps * per);
+}
+function toItems(specs) {
+  return {
+    items: specs.map((spec) => ({
+      metricId: spec.metricId,
+      label: spec.label,
+      actual: spec.actual,
+      threshold: spec.threshold,
+      deduction: spec.deduction
+    })),
+    metrics: specs.map((spec) => ({
+      metricId: spec.metricId,
+      label: spec.label,
+      value: spec.value,
+      threshold: spec.thresholdValue,
+      exceeded: spec.value > spec.thresholdValue
+    }))
+  };
+}
+function buildSpecs(input, t) {
+  const { complexity, duplication, dependency, typeSafety, tests } = input;
+  return {
+    complexity: [
+      {
+        metricId: "avg-function-lines",
+        label: "\u51FD\u6570\u5E73\u5747\u957F\u5EA6",
+        actual: `${String(complexity.avgFunctionLines)} \u884C`,
+        threshold: `${String(t.avgFunctionLines)} \u884C`,
+        value: complexity.avgFunctionLines,
+        thresholdValue: t.avgFunctionLines,
+        deduction: tiered(complexity.avgFunctionLines, t.avgFunctionLines, 10, 6)
+      },
+      {
+        metricId: "avg-cyclomatic",
+        label: "\u5708\u590D\u6742\u5EA6\u5747\u503C",
+        actual: String(complexity.avgCyclomatic),
+        threshold: String(t.avgCyclomatic),
+        value: complexity.avgCyclomatic,
+        thresholdValue: t.avgCyclomatic,
+        deduction: tiered(complexity.avgCyclomatic, t.avgCyclomatic, 1, 6)
+      },
+      {
+        metricId: "max-file-lines",
+        label: "\u6700\u957F\u6587\u4EF6",
+        actual: `${String(complexity.maxFileLines)} \u884C`,
+        threshold: `${String(t.maxFileLines)} \u884C`,
+        value: complexity.maxFileLines,
+        thresholdValue: t.maxFileLines,
+        deduction: tiered(complexity.maxFileLines, t.maxFileLines, 100, 4)
+      },
+      {
+        metricId: "complex-functions",
+        label: "\u8D85\u9650\u51FD\u6570\u6570",
+        actual: String(complexity.complexFunctions),
+        threshold: String(t.complexFunctionCount),
+        value: complexity.complexFunctions,
+        thresholdValue: t.complexFunctionCount,
+        deduction: tiered(complexity.complexFunctions, t.complexFunctionCount, 1, 4)
+      }
+    ],
+    duplication: [
+      {
+        metricId: "duplication-ratio",
+        label: "\u91CD\u590D\u4EE3\u7801\u5360\u6BD4",
+        actual: `${(duplication.ratio * 100).toFixed(1)}%`,
+        threshold: `${(t.duplicationRatio * 100).toFixed(1)}%`,
+        value: duplication.ratio,
+        thresholdValue: t.duplicationRatio,
+        // 每超 1 个百分点扣 2 分，最多 20
+        deduction: tiered(duplication.ratio, t.duplicationRatio, 0.01, 20, 2)
+      }
+    ],
+    dependency: [
+      {
+        metricId: "circular-dependencies",
+        label: "\u5FAA\u73AF\u4F9D\u8D56",
+        actual: String(dependency.circular),
+        threshold: String(t.circularDependencies),
+        value: dependency.circular,
+        thresholdValue: t.circularDependencies,
+        deduction: tiered(dependency.circular, t.circularDependencies, 1, 10, 3)
+      },
+      {
+        metricId: "loose-versions",
+        label: "\u7248\u672C\u8303\u56F4\u8FC7\u5BBD\u7684\u4F9D\u8D56\u5360\u6BD4",
+        actual: `${(dependency.looseRatio * 100).toFixed(0)}%`,
+        threshold: `${(t.looseVersionRatio * 100).toFixed(0)}%`,
+        value: dependency.looseRatio,
+        thresholdValue: t.looseVersionRatio,
+        deduction: tiered(dependency.looseRatio, t.looseVersionRatio, 0.1, 10, 3)
+      }
+    ],
+    "type-safety": [
+      {
+        metricId: "any-density",
+        label: "\u6BCF\u5343\u884C any \u6570\u91CF",
+        actual: String(typeSafety.anyDensity),
+        threshold: String(t.anyDensity),
+        value: typeSafety.anyDensity,
+        thresholdValue: t.anyDensity,
+        deduction: tiered(typeSafety.anyDensity, t.anyDensity, 2, 12, 2)
+      },
+      {
+        metricId: "ignored-checks",
+        label: "\u5FFD\u7565\u68C0\u67E5\u7684\u6CE8\u91CA\u6570",
+        actual: String(typeSafety.ignoredChecks),
+        threshold: String(t.ignoredChecks),
+        value: typeSafety.ignoredChecks,
+        thresholdValue: t.ignoredChecks,
+        deduction: tiered(typeSafety.ignoredChecks, t.ignoredChecks, 1, 8, 2)
+      }
+    ],
+    test: [
+      {
+        metricId: "coverage",
+        label: "\u884C\u8986\u76D6\u7387",
+        actual: tests.coveragePercent === null ? "\u672A\u63D0\u4F9B" : `${String(tests.coveragePercent)}%`,
+        threshold: `${String(t.coveragePercent)}%`,
+        value: tests.coveragePercent ?? 0,
+        thresholdValue: t.coveragePercent,
+        // 没有覆盖率数据时不扣分：拿「不知道」当「零」会平白扣掉一整个维度
+        deduction: tests.coveragePercent === null ? 0 : tiered(t.coveragePercent - tests.coveragePercent, 0, 10, 12)
+      },
+      {
+        metricId: "test-ratio",
+        label: "\u6D4B\u8BD5\u4E0E\u6E90\u7801\u6587\u4EF6\u6BD4",
+        actual: String(tests.ratio),
+        threshold: String(t.testToCodeRatio),
+        value: tests.ratio,
+        thresholdValue: t.testToCodeRatio,
+        deduction: tiered(t.testToCodeRatio - tests.ratio, 0, 0.2, 8, 2)
+      }
+    ]
+  };
+}
+function scoreInspection(input) {
+  const thresholds = input.thresholds ?? DEFAULT_THRESHOLDS;
+  const maxScore = input.config.maxScorePerDimension;
+  const specs = buildSpecs(input, thresholds);
+  const breakdown = [];
+  const metrics = [];
+  const scores = {};
+  for (const dimension of Object.keys(specs)) {
+    const converted = toItems(specs[dimension]);
+    const deduction = converted.items.reduce((sum, item) => sum + item.deduction, 0);
+    const score = Math.max(0, maxScore - deduction);
+    scores[dimension] = score;
+    metrics.push(...converted.metrics);
+    breakdown.push({
+      dimension,
+      score,
+      maxScore,
+      weight: input.config.weights[dimension],
+      items: converted.items
+    });
+  }
+  const weightSum = breakdown.reduce((sum, item) => sum + item.weight, 0);
+  const weighted = breakdown.reduce(
+    (sum, item) => sum + item.score / item.maxScore * item.weight,
+    0
+  );
+  const totalScore = weightSum === 0 ? 0 : Math.round(weighted / weightSum * 100);
+  return { breakdown, totalScore, scores, metrics };
+}
+
+// src/core/inspection/file-rules.ts
+var EMPTY_CATCH = /catch\s*(\([^)]*\))?\s*\{\s*(\/\/[^\n]*|\/\*[\s\S]*?\*\/)?\s*\}/;
+var HARDCODED_SECRET = /\b(api[_-]?key|secret|password|passwd|token|access[_-]?key)\b\s*[:=]\s*['"`][^'"`]{8,}['"`]/i;
+function cyclomaticOf(lines, startLine, endLine) {
+  const patterns = [
+    /\bif\s*\(/g,
+    /\bfor\s*\(/g,
+    /\bwhile\s*\(/g,
+    /\bcase\s+/g,
+    /\bcatch\s*\(/g,
+    /&&/g,
+    /\|\|/g,
+    /\?\?/g
+  ];
+  let branches = 0;
+  for (let index = startLine - 1; index < endLine && index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    for (const pattern of patterns) {
+      const local = new RegExp(pattern.source, "g");
+      branches += Math.max(0, (line.match(local) ?? []).length);
+    }
+  }
+  return branches + 1;
+}
+function checkFileRules(files, thresholds = DEFAULT_THRESHOLDS) {
+  const issues = [];
+  for (const file of files) {
+    const lines = file.content.split("\n");
+    if (lines.length > thresholds.maxFileLines) {
+      issues.push({
+        path: file.path,
+        line: null,
+        rule: "file-too-long",
+        severity: "minor",
+        title: `\u6587\u4EF6 ${String(lines.length)} \u884C\uFF0C\u8D85\u8FC7\u9608\u503C ${String(thresholds.maxFileLines)}`,
+        detail: "\u6587\u4EF6\u8FC7\u957F\u4F1A\u8BA9\u5B9A\u4F4D\u4E0E\u8BC4\u5BA1\u90FD\u53D8\u6162\uFF0C\u5EFA\u8BAE\u6309\u804C\u8D23\u62C6\u5206\u3002"
+      });
+    }
+    for (const region of listFunctions(lines)) {
+      const complexity = cyclomaticOf(lines, region.startLine, region.endLine);
+      if (complexity <= thresholds.avgCyclomatic) continue;
+      issues.push({
+        path: file.path,
+        line: region.startLine,
+        rule: "complex-function",
+        severity: complexity > thresholds.avgCyclomatic * 2 ? "major" : "minor",
+        title: `${region.name}() \u5708\u590D\u6742\u5EA6 ${String(complexity)}`,
+        detail: `\u9608\u503C ${String(thresholds.avgCyclomatic)}\u3002\u5206\u652F\u8D8A\u591A\uFF0C\u6D4B\u8BD5\u8986\u76D6\u8D8A\u96BE\u505A\u5168\u3002`
+      });
+    }
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (EMPTY_CATCH.test(line)) {
+        issues.push({
+          path: file.path,
+          line: index + 1,
+          rule: "empty-catch",
+          severity: "major",
+          title: "\u5F02\u5E38\u88AB\u9759\u9ED8\u541E\u6389",
+          detail: "\u51FA\u9519\u65F6\u4E0D\u4F1A\u6709\u4EFB\u4F55\u8BB0\u5F55\uFF0C\u6392\u67E5\u7EBF\u4E0A\u95EE\u9898\u65F6\u8FD9\u6761\u7EBF\u7D22\u76F4\u63A5\u6D88\u5931\u3002"
+        });
+      }
+      if (HARDCODED_SECRET.test(line)) {
+        issues.push({
+          path: file.path,
+          line: index + 1,
+          rule: "hardcoded-secret",
+          severity: "major",
+          title: "\u7591\u4F3C\u5199\u6B7B\u7684\u51ED\u8BC1",
+          detail: "\u51ED\u8BC1\u8FDB\u4E86\u4EE3\u7801\u5C31\u8FDB\u4E86\u7248\u672C\u5386\u53F2\uFF0C\u8F6E\u6362\u524D\u4E00\u76F4\u6709\u6548\u3002\u5E94\u6539\u4E3A\u4ECE\u73AF\u5883\u53D8\u91CF\u6216\u5BC6\u94A5\u670D\u52A1\u8BFB\u53D6\u3002"
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+// src/core/inspection/metrics.ts
+var DECISION_PATTERNS = [
+  /\bif\s*\(/g,
+  /\bfor\s*\(/g,
+  /\bwhile\s*\(/g,
+  /\bcase\s+/g,
+  /\bcatch\s*\(/g,
+  /&&/g,
+  /\|\|/g,
+  /\?\?/g,
+  /\?\s*[^:]+:/g
+];
+function decisionPoints(line) {
+  let count = 0;
+  for (const pattern of DECISION_PATTERNS) {
+    const local = new RegExp(pattern.source, "g");
+    count += Math.max(0, (line.match(local) ?? []).length);
+  }
+  return count;
+}
+function cyclomaticOf2(lines, startLine, endLine) {
+  let branches = 0;
+  for (let index = startLine - 1; index < endLine && index < lines.length; index += 1) {
+    branches += decisionPoints(lines[index] ?? "");
+  }
+  return branches + 1;
+}
+function computeComplexity(files, complexityThreshold) {
+  let totalLines = 0;
+  let functionCount = 0;
+  let functionLines = 0;
+  let maxFunctionLines = 0;
+  let maxFileLines = 0;
+  let complexFunctions = 0;
+  let cyclomaticSum = 0;
+  let maxCyclomatic = 0;
+  for (const file of files) {
+    const lines = file.content.split("\n");
+    totalLines += lines.length;
+    maxFileLines = Math.max(maxFileLines, lines.length);
+    for (const region of listFunctions(lines)) {
+      const length = region.endLine - region.startLine + 1;
+      const cyclomatic = cyclomaticOf2(lines, region.startLine, region.endLine);
+      functionCount += 1;
+      functionLines += length;
+      maxFunctionLines = Math.max(maxFunctionLines, length);
+      cyclomaticSum += cyclomatic;
+      maxCyclomatic = Math.max(maxCyclomatic, cyclomatic);
+      if (cyclomatic > complexityThreshold) complexFunctions += 1;
+    }
+  }
+  return {
+    files: files.length,
+    totalLines,
+    functions: functionCount,
+    avgFunctionLines: functionCount === 0 ? 0 : Math.round(functionLines / functionCount),
+    maxFunctionLines,
+    avgCyclomatic: functionCount === 0 ? 0 : Number((cyclomaticSum / functionCount).toFixed(1)),
+    maxCyclomatic,
+    complexFunctions,
+    maxFileLines
+  };
+}
+var DUPLICATION_WINDOW = 6;
+function normalizeForHash(line) {
+  return line.replace(/\s+/g, " ").trim();
+}
+function computeDuplication(files) {
+  const windows = /* @__PURE__ */ new Map();
+  const marked = /* @__PURE__ */ new Set();
+  let totalLines = 0;
+  for (const file of files) {
+    const lines = file.content.split("\n").map(normalizeForHash);
+    const significant = lines.filter((line) => line !== "");
+    totalLines += significant.length;
+    for (let start = 0; start + DUPLICATION_WINDOW <= significant.length; start += 1) {
+      const key = significant.slice(start, start + DUPLICATION_WINDOW).join("\n");
+      const seen = windows.get(key);
+      if (seen === void 0) {
+        windows.set(key, 1);
+        continue;
+      }
+      windows.set(key, seen + 1);
+      for (let offset = 0; offset < DUPLICATION_WINDOW; offset += 1) {
+        marked.add(`${file.path}\0${String(start + offset)}`);
+      }
+    }
+  }
+  return {
+    ratio: totalLines === 0 ? 0 : Number((marked.size / totalLines).toFixed(4)),
+    duplicatedLines: marked.size,
+    totalLines,
+    blocks: [...windows.values()].filter((count) => count > 1).length
+  };
+}
+function resolveRelative(fromPath, source) {
+  if (!source.startsWith(".")) return null;
+  const segments = fromPath.split("/").slice(0, -1);
+  for (const part of source.split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") segments.pop();
+    else segments.push(part);
+  }
+  return segments.join("/");
+}
+function countCircularDependencies(files) {
+  const known = new Set(files.map((file) => file.path));
+  const edges = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    const targets = [];
+    const pattern = /from\s+['"](\.[^'"]+)['"]/g;
+    for (const match of file.content.matchAll(pattern)) {
+      const base = resolveRelative(file.path, match[1] ?? "");
+      if (base === null) continue;
+      const candidate = [`${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}/index.ts`, base].find(
+        (path) => known.has(path)
+      );
+      if (candidate !== void 0) targets.push(candidate);
+    }
+    edges.set(file.path, targets);
+  }
+  let circular = 0;
+  const state = /* @__PURE__ */ new Map();
+  const visit = (path) => {
+    const current = state.get(path);
+    if (current === "done") return;
+    if (current === "visiting") {
+      circular += 1;
+      return;
+    }
+    state.set(path, "visiting");
+    for (const next of edges.get(path) ?? []) visit(next);
+    state.set(path, "done");
+  };
+  for (const file of files) visit(file.path);
+  return circular;
+}
+function computeDependencies(files) {
+  const manifest = files.find(
+    (file) => file.path === "package.json" || file.path.endsWith("/package.json")
+  );
+  let total = 0;
+  let loose = 0;
+  if (manifest !== void 0) {
+    try {
+      const parsed = JSON.parse(manifest.content);
+      const sections = ["dependencies", "devDependencies"];
+      for (const section of sections) {
+        const block = parsed[section];
+        if (typeof block !== "object" || block === null) continue;
+        for (const range of Object.values(block)) {
+          if (typeof range !== "string") continue;
+          total += 1;
+          if (/^[\^~*]|^>=|^latest$/.test(range)) loose += 1;
+        }
+      }
+    } catch {
+    }
+  }
+  return {
+    total,
+    loose,
+    looseRatio: total === 0 ? 0 : Number((loose / total).toFixed(2)),
+    circular: countCircularDependencies(files),
+    // 过期与漏洞需要查外部数据库，没有数据就不假装有
+    checkedOutdated: false
+  };
+}
+function computeTypeSafety(files) {
+  let anyCount = 0;
+  let ignoredChecks = 0;
+  let totalLines = 0;
+  for (const file of files) {
+    const lines = file.content.split("\n");
+    totalLines += lines.length;
+    for (const line of lines) {
+      if (/@ts-ignore|@ts-expect-error|eslint-disable.*no-explicit-any/.test(line))
+        ignoredChecks += 1;
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+      if (/:\s*any\b|<any>|as\s+any\b/.test(line)) anyCount += 1;
+    }
+  }
+  return {
+    anyCount,
+    ignoredChecks,
+    anyDensity: totalLines === 0 ? 0 : Number((anyCount / totalLines * 1e3).toFixed(1)),
+    totalLines
+  };
+}
+var TEST_PATTERN = /(\.|-)(test|spec)\.[a-z]+$|(^|\/)__tests__\//i;
+function computeTests(files, coveragePercent = null) {
+  const testFiles = files.filter((file) => TEST_PATTERN.test(file.path)).length;
+  const sourceFiles = files.length - testFiles;
+  return {
+    sourceFiles,
+    testFiles,
+    ratio: sourceFiles === 0 ? 0 : Number((testFiles / sourceFiles).toFixed(2)),
+    coveragePercent
+  };
+}
+
+// src/core/inspection/run.ts
+function toFindings(files, thresholds) {
+  return checkFileRules(files, thresholds).map((issue) => {
+    const line = issue.line ?? 1;
+    const fingerprint = computeFingerprint({
+      file: issue.path,
+      reviewer: "correctness",
+      title: issue.title,
+      evidence: `${issue.rule}:${issue.path}:${issue.title}`
+    });
+    return {
+      fingerprint,
+      reviewer: "correctness",
+      // 巡检没有改动，锚点用「上下文行」表达：这行在文件里存在，但不属于任何一次改动
+      anchor: { file: issue.path, oldPath: null, kind: "context", newLine: line, oldLine: line },
+      positionOrigin: "model-line",
+      severity: issue.severity,
+      category: issue.rule,
+      title: issue.title,
+      body: issue.detail,
+      evidence: issue.title,
+      suggestion: null,
+      confidence: 1,
+      preexisting: true,
+      scope: "file"
+    };
+  });
+}
+function countBySeverity2(findings) {
+  const counts = { blocker: 0, major: 0, minor: 0, nit: 0 };
+  for (const finding of findings) counts[finding.severity] += 1;
+  return counts;
+}
+function runInspection(input) {
+  const complexity = computeComplexity(
+    input.files,
+    (input.thresholds ?? void 0)?.avgCyclomatic ?? 10
+  );
+  const duplication = computeDuplication(input.files);
+  const dependency = computeDependencies(input.files);
+  const typeSafety = computeTypeSafety(input.files);
+  const tests = computeTests(input.files, input.coveragePercent ?? null);
+  const scored = scoreInspection({
+    complexity,
+    duplication,
+    dependency,
+    typeSafety,
+    tests,
+    config: input.config,
+    ...input.thresholds === void 0 ? {} : { thresholds: input.thresholds }
+  });
+  const findings = toFindings(input.files, input.thresholds);
+  const counts = countBySeverity2(findings);
+  const current = new Set(findings.map((finding) => finding.fingerprint));
+  const previous = new Set(input.previousFingerprints ?? []);
+  const hasPrevious = input.previousFingerprints !== void 0;
+  const regressions = hasPrevious ? [...current].filter((fingerprint) => !previous.has(fingerprint)) : [];
+  const resolved = hasPrevious ? [...previous].filter((fingerprint) => !current.has(fingerprint)) : [];
+  const scores = {};
+  for (const item of scored.breakdown) scores[item.dimension] = item.score;
+  return {
+    repository: input.repository,
+    commitSha: input.commitSha,
+    inspectedAt: (input.now ?? (() => (/* @__PURE__ */ new Date()).toISOString()))(),
+    metrics: scored.metrics,
+    breakdown: scored.breakdown,
+    totalScore: scored.totalScore,
+    scores,
+    counts: {
+      blocker: counts.blocker,
+      major: counts.major,
+      minor: counts.minor,
+      nit: counts.nit
+    },
+    findings,
+    regressions,
+    resolved,
+    previousRef: null,
+    location: null
+  };
+}
+
+// src/cli/walk.ts
+import { readdir, readFile as readFile2 } from "node:fs/promises";
+import { join as join2, relative } from "node:path";
+var SOURCE_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".vue",
+  ".svelte",
+  ".py",
+  ".go",
+  ".java",
+  ".rs",
+  ".rb",
+  ".php",
+  ".cs"
+]);
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "coverage",
+  ".git",
+  ".next",
+  ".nuxt",
+  ".workbuddy",
+  "vendor",
+  "__pycache__",
+  ".venv"
+]);
+function isSourceFile(path) {
+  const dot = path.lastIndexOf(".");
+  if (dot < 0) return false;
+  return SOURCE_EXTENSIONS.has(path.slice(dot).toLowerCase());
+}
+async function collectSourceFiles(root, maxFiles = 5e3) {
+  const files = [];
+  const walk = async (dir) => {
+    if (files.length >= maxFiles) return;
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (files.length >= maxFiles) return;
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        await walk(join2(dir, entry.name));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!isSourceFile(entry.name)) continue;
+      const absolute = join2(dir, entry.name);
+      const path = relative(root, absolute).split("\\").join("/");
+      files.push({ path, content: await readFile2(absolute, "utf8") });
+    }
+  };
+  await walk(root);
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+async function readOptional(root, name) {
+  try {
+    const content = await readFile2(join2(root, name), "utf8");
+    return { path: name, content };
+  } catch {
+    return null;
+  }
+}
+
 // src/cli/stats.ts
 var ORIGIN_LABEL = {
   "model-line": "\u6A21\u578B\u884C\u53F7",
@@ -20552,7 +21320,7 @@ ${USAGE}`);
         stderr("\u9700\u8981\u4E24\u4EFD\u5FEB\u7167\uFF1Aacr eval --baseline <\u57FA\u51C6.json> --current <\u672C\u6B21.json>\n");
         return 2;
       }
-      const load = async (path) => JSON.parse(await readFile2(path, "utf8"));
+      const load = async (path) => JSON.parse(await readFile3(path, "utf8"));
       const before = await load(beforePath);
       const after = await load(afterPath);
       if (!isBaselineSnapshot(before) || !isBaselineSnapshot(after)) {
@@ -20564,8 +21332,42 @@ ${USAGE}`);
 `);
       return comparison.comparable ? 0 : 1;
     }
-    stderr(`\u5B50\u547D\u4EE4 ${first} \u5C1A\u672A\u5B9E\u73B0
+    if (first === "inspect") {
+      const loaded = await loadConfig(resolved.cwd);
+      if (!loaded.ok) {
+        for (const error of loaded.errors) stderr(`${error.path}\uFF1A${error.message}
 `);
+        return 1;
+      }
+      const files = await collectSourceFiles(resolved.cwd);
+      const manifest = await readOptional(resolved.cwd, "package.json");
+      const allFiles = manifest === null ? files : [...files, manifest];
+      const coverageText = flags["coverage"];
+      const coverage = coverageText === void 0 || coverageText === "" ? null : Number(coverageText);
+      if (coverage !== null && !Number.isFinite(coverage)) {
+        stderr("--coverage \u5FC5\u987B\u662F\u6570\u5B57\uFF08\u767E\u5206\u6BD4\uFF09\n");
+        return 2;
+      }
+      const report = runInspection({
+        repository: resolved.env["GITHUB_REPOSITORY"] ?? "local",
+        commitSha: resolved.env["GITHUB_SHA"] ?? "unknown",
+        files: allFiles,
+        config: loaded.config.inspection,
+        coveragePercent: coverage
+      });
+      const markdown = renderReport(report);
+      const outPath = flags["out"];
+      if (outPath !== void 0 && outPath !== "") {
+        const { writeFile } = await import("node:fs/promises");
+        await writeFile(outPath, markdown, "utf8");
+        stdout(`\u62A5\u544A\u5DF2\u5199\u5165 ${outPath}
+`);
+      } else {
+        stdout(markdown);
+      }
+      return 0;
+    }
+    stderr("\u8BE5\u5B50\u547D\u4EE4\u5C1A\u672A\u63A5\u5165\u5B9E\u73B0\n");
     return 3;
   } catch (error) {
     stderr(`\u8FD0\u884C\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}
