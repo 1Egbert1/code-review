@@ -12,6 +12,7 @@
 
 import type { Finding, RejectionReason } from '../contracts/finding.js';
 import type { ReviewResult } from '../contracts/result.js';
+import { formatUsd } from '../core/cost/pricing.js';
 
 const ORIGIN_LABEL: Readonly<Record<string, string>> = {
   'model-line': '模型行号',
@@ -94,6 +95,31 @@ export function formatStats(input: StatsInput): string {
       result.summaryOnly.length,
     )} 条${routed > 0 ? `（其中 ${String(routed)} 条因行内已满被路由）` : ''}`,
   );
+
+  // 成本构成：只报总额看不出省在哪
+  if (
+    tokens.uncachedInput + tokens.cacheRead + tokens.cacheWriteShort + tokens.cacheWriteLong >
+    0
+  ) {
+    lines.push(
+      `token 构成：未缓存 ${formatTokens(tokens.uncachedInput)} / 缓存读 ${formatTokens(tokens.cacheRead)} / 缓存写 ${formatTokens(
+        tokens.cacheWriteShort + tokens.cacheWriteLong,
+      )} / 输出 ${formatTokens(tokens.output)}`,
+    );
+  }
+
+  if (result.usage.breakdown !== null) {
+    const parts = [
+      ['未缓存', result.usage.breakdown.uncachedInput],
+      ['缓存写', result.usage.breakdown.cacheWriteShort + result.usage.breakdown.cacheWriteLong],
+      ['缓存读', result.usage.breakdown.cacheRead],
+      ['输出', result.usage.breakdown.output],
+    ]
+      .filter(([, value]) => (value as number) > 0)
+      .map(([label, value]) => `${String(label)} ${formatUsd(value as number)}`);
+
+    lines.push(`成本构成：${parts.join(' · ')}`);
+  }
 
   lines.push(originSection(result.findings));
   lines.push(...rejectionSection(result));

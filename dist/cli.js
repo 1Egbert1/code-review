@@ -10236,6 +10236,33 @@ function resolvedNotice(isoTime) {
   return `> \u8BE5\u95EE\u9898\u5DF2\u5728\u540E\u7EED\u63D0\u4EA4\u4E2D\u4FEE\u590D\uFF08${isoTime}\uFF09\u3002`;
 }
 
+// src/core/cost/pricing.ts
+var PER_MILLION = 1e6;
+function computeCost(usage, pricing) {
+  if (pricing === null) return null;
+  const inputPrice = pricing.inputPerMTok / PER_MILLION;
+  const outputPrice = pricing.outputPerMTok / PER_MILLION;
+  const uncachedInput = usage.uncachedInput * inputPrice;
+  const cacheWriteShort = usage.cacheWriteShort * inputPrice * pricing.cacheWriteShortMultiplier;
+  const cacheWriteLong = usage.cacheWriteLong * inputPrice * pricing.cacheWriteLongMultiplier;
+  const cacheRead = usage.cacheRead * inputPrice * pricing.cacheReadMultiplier;
+  const output = usage.output * outputPrice;
+  return {
+    uncachedInput,
+    cacheWriteShort,
+    cacheWriteLong,
+    cacheRead,
+    output,
+    total: uncachedInput + cacheWriteShort + cacheWriteLong + cacheRead + output
+  };
+}
+function formatUsd(value) {
+  if (value === 0) return "$0";
+  if (value >= 0.01) return `$${value.toFixed(3)}`;
+  if (value >= 1e-4) return `$${value.toFixed(5)}`;
+  return `$${value.toExponential(2)}`;
+}
+
 // src/core/routing/model-route.ts
 var RISK_PATH_PATTERNS = [
   {
@@ -12000,6 +12027,7 @@ async function runReview(request2, deps) {
       calls: totals.calls,
       tokens: totals.usage,
       estimatedCostUsd: estimateCost(totals.usage, deps.config),
+      breakdown: computeCost(totals.usage, deps.config.llm.pricing),
       truncatedByBudget: budgetExhausted
     },
     warnings,
@@ -12014,11 +12042,7 @@ async function runReview(request2, deps) {
   };
 }
 function estimateCost(usage, config) {
-  const pricing = config.llm.pricing;
-  if (pricing === null) return null;
-  const input = pricing.inputPerMTok / 1e6;
-  const output = pricing.outputPerMTok / 1e6;
-  return usage.uncachedInput * input + usage.cacheWriteShort * input * pricing.cacheWriteShortMultiplier + usage.cacheWriteLong * input * pricing.cacheWriteLongMultiplier + usage.cacheRead * input * pricing.cacheReadMultiplier + usage.output * output;
+  return computeCost(usage, config.llm.pricing)?.total ?? null;
 }
 async function runWithRetry(deps, spec, input, model, shrink) {
   const call = () => runReviewer({
@@ -20177,6 +20201,22 @@ function formatStats(input) {
       result.summaryOnly.length
     )} \u6761${routed > 0 ? `\uFF08\u5176\u4E2D ${String(routed)} \u6761\u56E0\u884C\u5185\u5DF2\u6EE1\u88AB\u8DEF\u7531\uFF09` : ""}`
   );
+  if (tokens.uncachedInput + tokens.cacheRead + tokens.cacheWriteShort + tokens.cacheWriteLong > 0) {
+    lines.push(
+      `token \u6784\u6210\uFF1A\u672A\u7F13\u5B58 ${formatTokens(tokens.uncachedInput)} / \u7F13\u5B58\u8BFB ${formatTokens(tokens.cacheRead)} / \u7F13\u5B58\u5199 ${formatTokens(
+        tokens.cacheWriteShort + tokens.cacheWriteLong
+      )} / \u8F93\u51FA ${formatTokens(tokens.output)}`
+    );
+  }
+  if (result.usage.breakdown !== null) {
+    const parts = [
+      ["\u672A\u7F13\u5B58", result.usage.breakdown.uncachedInput],
+      ["\u7F13\u5B58\u5199", result.usage.breakdown.cacheWriteShort + result.usage.breakdown.cacheWriteLong],
+      ["\u7F13\u5B58\u8BFB", result.usage.breakdown.cacheRead],
+      ["\u8F93\u51FA", result.usage.breakdown.output]
+    ].filter(([, value]) => value > 0).map(([label, value]) => `${String(label)} ${formatUsd(value)}`);
+    lines.push(`\u6210\u672C\u6784\u6210\uFF1A${parts.join(" \xB7 ")}`);
+  }
   lines.push(originSection(result.findings));
   lines.push(...rejectionSection(result));
   lines.push("\u884C\u5185 + \u6458\u8981\u5408\u8BA1\u672A\u4E22\u4EFB\u4F55\u901A\u8FC7\u6821\u9A8C\u7684\u6761\u76EE");

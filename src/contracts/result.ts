@@ -88,6 +88,20 @@ export interface TokenUsage {
   readonly output: number;
 }
 
+/**
+ * 成本构成，五项分别计价。
+ *
+ * 只报总额没法优化：看不出省在「材料变少」「缓存命中」还是「换了便宜模型」。
+ */
+export interface CostBreakdown {
+  readonly uncachedInput: number;
+  readonly cacheWriteShort: number;
+  readonly cacheWriteLong: number;
+  readonly cacheRead: number;
+  readonly output: number;
+  readonly total: number;
+}
+
 /** 一轮运行的用量与费用。 */
 export interface Usage {
   readonly calls: number;
@@ -99,6 +113,8 @@ export interface Usage {
   readonly estimatedCostUsd: number | null;
   /** 是否因预算上限提前中止 */
   readonly truncatedByBudget: boolean;
+  /** 五项成本构成；未配置单价时为 null */
+  readonly breakdown: CostBreakdown | null;
 }
 
 /** 覆盖率台账。运行终态由它推导，而不是由「是否出现过错误」推导。 */

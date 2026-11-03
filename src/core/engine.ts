@@ -36,6 +36,7 @@ import {
 } from './reconcile/checkpoint.js';
 import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
+import { computeCost } from './cost/pricing.js';
 import { routeModel } from './routing/model-route.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
@@ -537,6 +538,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
       calls: totals.calls,
       tokens: totals.usage,
       estimatedCostUsd: estimateCost(totals.usage, deps.config),
+      breakdown: computeCost(totals.usage, deps.config.llm.pricing),
       truncatedByBudget: budgetExhausted,
     },
     warnings,
@@ -556,19 +558,7 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
 /** 按配置单价折算费用；未配单价时返回 null——**不得用 0 代替**，0 会让人以为免费。 */
 function estimateCost(usage: TokenUsage, config: ResolvedConfig): number | null {
-  const pricing = config.llm.pricing;
-  if (pricing === null) return null;
-
-  const input = pricing.inputPerMTok / 1_000_000;
-  const output = pricing.outputPerMTok / 1_000_000;
-
-  return (
-    usage.uncachedInput * input +
-    usage.cacheWriteShort * input * pricing.cacheWriteShortMultiplier +
-    usage.cacheWriteLong * input * pricing.cacheWriteLongMultiplier +
-    usage.cacheRead * input * pricing.cacheReadMultiplier +
-    usage.output * output
-  );
+  return computeCost(usage, config.llm.pricing)?.total ?? null;
 }
 
 /**
