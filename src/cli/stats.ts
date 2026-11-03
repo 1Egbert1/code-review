@@ -13,6 +13,7 @@
 import type { Finding, RejectionReason } from '../contracts/finding.js';
 import type { ReviewResult } from '../contracts/result.js';
 import { formatUsd } from '../core/cost/pricing.js';
+import type { BaselineComparison } from '../core/eval/baseline.js';
 
 const ORIGIN_LABEL: Readonly<Record<string, string>> = {
   'model-line': '模型行号',
@@ -143,5 +144,39 @@ export function formatStats(input: StatsInput): string {
     lines.push('（只打印模式：以上内容未发送到平台）');
   }
 
+  return lines.join('\n');
+}
+
+/** 基准对比的可读输出。 */
+export function formatComparison(comparison: BaselineComparison): string {
+  if (!comparison.comparable) return `无法对比：${comparison.reason}`;
+
+  const lines: string[] = [];
+  lines.push('指标          基准        本次        变化');
+
+  for (const metric of comparison.metrics) {
+    const format = (value: number): string =>
+      metric.name.includes('延迟')
+        ? `${(value / 1000).toFixed(1)}s`
+        : metric.name.includes('成本')
+          ? formatUsd(value)
+          : value.toFixed(3);
+
+    const arrow = metric.delta === 0 ? '—' : metric.delta > 0 ? '↑' : '↓';
+    lines.push(
+      `${metric.name.padEnd(10, ' ')}  ${format(metric.before).padStart(8, ' ')}  ${format(metric.after).padStart(8, ' ')}  ${arrow} ${format(
+        Math.abs(metric.delta),
+      )}`,
+    );
+  }
+
+  if (comparison.changedPrompts.length > 0) {
+    lines.push(`\n变更的维度：${comparison.changedPrompts.join('、')}`);
+  }
+  if (comparison.crossModel) {
+    lines.push('注意：两次使用的模型不同，结论仅供参考');
+  }
+
+  lines.push(`\n结论：${comparison.verdict}`);
   return lines.join('\n');
 }

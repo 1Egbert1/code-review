@@ -81,3 +81,60 @@ describe('命令行入口', () => {
     expect(box.stdout()).toContain('子命令');
   });
 });
+
+describe('eval 子命令', () => {
+  const SNAPSHOT = (datasetHash: string, recall: number): Record<string, unknown> => ({
+    version: 1,
+    label: 'v1',
+    createdAt: '2026-11-03T00:00:00Z',
+    codeVersion: 'abc',
+    promptVersions: { correctness: 'v1.0' },
+    model: 'm',
+    configHash: 'c',
+    datasetHash,
+    metrics: { recall, precision: 0.8, avgLatencyMs: 1000, reproducibility: 1, samples: 5 },
+    cost: null,
+  });
+
+  async function writeFixture(name: string, content: unknown): Promise<string> {
+    const { writeFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const path = join(tmpdir(), name);
+    await writeFile(path, JSON.stringify(content), 'utf8');
+    return path;
+  }
+
+  it('缺参数时返回 2 并说明用法', async () => {
+    const box = harness();
+    expect(await main(['eval'], box.deps)).toBe(2);
+    expect(box.stderr()).toContain('--baseline');
+  });
+
+  it('样本集相同则给出对比表', async () => {
+    const box = harness();
+    const a = await writeFixture('acr-base.json', SNAPSHOT('ds1', 0.7));
+    const b = await writeFixture('acr-cur.json', SNAPSHOT('ds1', 0.75));
+
+    expect(await main(['eval', '--baseline', a, '--current', b], box.deps)).toBe(0);
+    expect(box.stdout()).toContain('召回率');
+    expect(box.stdout()).toContain('结论');
+  });
+
+  it('样本集不同时拒绝对比并用非零退出', async () => {
+    const box = harness();
+    const a = await writeFixture('acr-base2.json', SNAPSHOT('ds1', 0.7));
+    const b = await writeFixture('acr-cur2.json', SNAPSHOT('ds2', 0.7));
+
+    expect(await main(['eval', '--baseline', a, '--current', b], box.deps)).toBe(1);
+    expect(box.stdout()).toContain('无法对比');
+  });
+
+  it('文件不是快照时报错，而不是当成空数据', async () => {
+    const box = harness();
+    const a = await writeFixture('acr-bad.json', { hello: 'world' });
+    const b = await writeFixture('acr-cur3.json', SNAPSHOT('ds1', 0.7));
+
+    expect(await main(['eval', '--baseline', a, '--current', b], box.deps)).toBe(1);
+    expect(box.stderr()).toContain('不是有效的基准快照');
+  });
+});

@@ -8685,6 +8685,9 @@ var require_light = __commonJS({
   }
 });
 
+// src/cli/main.ts
+import { readFile as readFile2 } from "node:fs/promises";
+
 // src/config/load.ts
 var import_yaml = __toESM(require_dist(), 1);
 import { readFile } from "node:fs/promises";
@@ -20145,6 +20148,79 @@ function createOpenAiCompatClient(options) {
   };
 }
 
+// src/core/eval/baseline.ts
+function compareBaselines(before, after) {
+  if (before.datasetHash !== after.datasetHash) {
+    return {
+      comparable: false,
+      reason: `\u6837\u672C\u96C6\u5DF2\u53D8\u66F4\uFF08${before.datasetHash} \u2192 ${after.datasetHash}\uFF09\uFF0C\u4E24\u4EFD\u7ED3\u679C\u4E0D\u662F\u540C\u4E00\u9053\u9898\uFF0C\u9700\u91CD\u8DD1\u57FA\u51C6`
+    };
+  }
+  const metrics = [
+    {
+      name: "\u53EC\u56DE\u7387",
+      before: before.metrics.recall,
+      after: after.metrics.recall,
+      delta: after.metrics.recall - before.metrics.recall,
+      higherIsBetter: true
+    },
+    {
+      name: "\u7CBE\u786E\u7387",
+      before: before.metrics.precision,
+      after: after.metrics.precision,
+      delta: after.metrics.precision - before.metrics.precision,
+      higherIsBetter: true
+    },
+    {
+      name: "\u5E73\u5747\u5EF6\u8FDF",
+      before: before.metrics.avgLatencyMs,
+      after: after.metrics.avgLatencyMs,
+      delta: after.metrics.avgLatencyMs - before.metrics.avgLatencyMs,
+      higherIsBetter: false
+    },
+    {
+      name: "\u590D\u73B0\u7387",
+      before: before.metrics.reproducibility,
+      after: after.metrics.reproducibility,
+      delta: after.metrics.reproducibility - before.metrics.reproducibility,
+      higherIsBetter: true
+    }
+  ];
+  if (before.cost !== null && after.cost !== null) {
+    metrics.push({
+      name: "\u5E73\u5747\u6210\u672C",
+      before: before.cost.total,
+      after: after.cost.total,
+      delta: after.cost.total - before.cost.total,
+      higherIsBetter: false
+    });
+  }
+  const changedPrompts = Object.keys({ ...before.promptVersions, ...after.promptVersions }).filter(
+    (key) => before.promptVersions[key] !== after.promptVersions[key]
+  );
+  return {
+    comparable: true,
+    metrics,
+    changedPrompts,
+    crossModel: before.model !== after.model,
+    verdict: verdictOf(metrics)
+  };
+}
+function verdictOf(metrics) {
+  const recall = metrics.find((metric) => metric.name === "\u53EC\u56DE\u7387");
+  const cost = metrics.find((metric) => metric.name === "\u5E73\u5747\u6210\u672C");
+  const recallDrop = recall !== void 0 && recall.delta < -0.02;
+  const costDrop = cost !== void 0 && cost.before > 0 && cost.delta / cost.before < -0.15;
+  if (recallDrop) return "\u53EC\u56DE\u660E\u663E\u4E0B\u964D\uFF0C\u4E0D\u5EFA\u8BAE\u91C7\u7528";
+  if (costDrop) return "\u6210\u672C\u660E\u663E\u4E0B\u964D\u4E14\u53EC\u56DE\u672A\u9000\uFF0C\u51C0\u6536\u76CA\u4E3A\u6B63";
+  return "\u53D8\u5316\u4E0D\u663E\u8457\uFF0C\u9700\u7ED3\u5408\u5177\u4F53\u6837\u672C\u5224\u65AD";
+}
+function isBaselineSnapshot(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value;
+  return record["version"] === 1 && typeof record["label"] === "string" && typeof record["datasetHash"] === "string" && typeof record["model"] === "string" && typeof record["metrics"] === "object" && record["metrics"] !== null;
+}
+
 // src/cli/stats.ts
 var ORIGIN_LABEL = {
   "model-line": "\u6A21\u578B\u884C\u53F7",
@@ -20233,6 +20309,30 @@ function formatStats(input) {
     lines.push("");
     lines.push("\uFF08\u53EA\u6253\u5370\u6A21\u5F0F\uFF1A\u4EE5\u4E0A\u5185\u5BB9\u672A\u53D1\u9001\u5230\u5E73\u53F0\uFF09");
   }
+  return lines.join("\n");
+}
+function formatComparison(comparison) {
+  if (!comparison.comparable) return `\u65E0\u6CD5\u5BF9\u6BD4\uFF1A${comparison.reason}`;
+  const lines = [];
+  lines.push("\u6307\u6807          \u57FA\u51C6        \u672C\u6B21        \u53D8\u5316");
+  for (const metric of comparison.metrics) {
+    const format = (value) => metric.name.includes("\u5EF6\u8FDF") ? `${(value / 1e3).toFixed(1)}s` : metric.name.includes("\u6210\u672C") ? formatUsd(value) : value.toFixed(3);
+    const arrow = metric.delta === 0 ? "\u2014" : metric.delta > 0 ? "\u2191" : "\u2193";
+    lines.push(
+      `${metric.name.padEnd(10, " ")}  ${format(metric.before).padStart(8, " ")}  ${format(metric.after).padStart(8, " ")}  ${arrow} ${format(
+        Math.abs(metric.delta)
+      )}`
+    );
+  }
+  if (comparison.changedPrompts.length > 0) {
+    lines.push(`
+\u53D8\u66F4\u7684\u7EF4\u5EA6\uFF1A${comparison.changedPrompts.join("\u3001")}`);
+  }
+  if (comparison.crossModel) {
+    lines.push("\u6CE8\u610F\uFF1A\u4E24\u6B21\u4F7F\u7528\u7684\u6A21\u578B\u4E0D\u540C\uFF0C\u7ED3\u8BBA\u4EC5\u4F9B\u53C2\u8003");
+  }
+  lines.push(`
+\u7ED3\u8BBA\uFF1A${comparison.verdict}`);
   return lines.join("\n");
 }
 
@@ -20444,6 +20544,25 @@ ${USAGE}`);
       stdout(`${estimateCostText(loaded.config, files, lines)}
 `);
       return 0;
+    }
+    if (first === "eval") {
+      const beforePath = flags["baseline"];
+      const afterPath = flags["current"];
+      if (beforePath === void 0 || beforePath === "" || afterPath === void 0 || afterPath === "") {
+        stderr("\u9700\u8981\u4E24\u4EFD\u5FEB\u7167\uFF1Aacr eval --baseline <\u57FA\u51C6.json> --current <\u672C\u6B21.json>\n");
+        return 2;
+      }
+      const load = async (path) => JSON.parse(await readFile2(path, "utf8"));
+      const before = await load(beforePath);
+      const after = await load(afterPath);
+      if (!isBaselineSnapshot(before) || !isBaselineSnapshot(after)) {
+        stderr("\u6587\u4EF6\u4E0D\u662F\u6709\u6548\u7684\u57FA\u51C6\u5FEB\u7167\uFF08\u7248\u672C\u6216\u5B57\u6BB5\u4E0D\u7B26\uFF09\n");
+        return 1;
+      }
+      const comparison = compareBaselines(before, after);
+      stdout(`${formatComparison(comparison)}
+`);
+      return comparison.comparable ? 0 : 1;
     }
     stderr(`\u5B50\u547D\u4EE4 ${first} \u5C1A\u672A\u5B9E\u73B0
 `);

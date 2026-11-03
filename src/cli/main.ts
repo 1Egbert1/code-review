@@ -15,13 +15,16 @@
 import type { ResolvedConfig } from '../contracts/config.js';
 import type { ReviewRequest } from '../contracts/diff.js';
 import type { ReviewResult } from '../contracts/result.js';
+import { readFile } from 'node:fs/promises';
+
 import { loadConfig } from '../config/load.js';
 import { describeActions, runReview } from '../core/engine.js';
 import { createGitHubCommentPort } from '../platforms/github/comments.js';
 import { createGitHubGateway } from '../platforms/github/client.js';
 import { fetchSnapshot } from '../platforms/github/fetch.js';
 import { createOpenAiCompatClient } from '../providers/openai-compat.js';
-import { formatStats } from './stats.js';
+import { compareBaselines, isBaselineSnapshot } from '../core/eval/baseline.js';
+import { formatComparison, formatStats } from './stats.js';
 
 const COMMANDS = ['review', 'dry-run', 'inspect', 'cost', 'eval'] as const;
 
@@ -288,7 +291,37 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
       return 0;
     }
 
-    // inspect / eval 在后续任务包实现。现在明确告知，而不是静默成功。
+    if (first === 'eval') {
+      const beforePath = flags['baseline'];
+      const afterPath = flags['current'];
+      if (
+        beforePath === undefined ||
+        beforePath === '' ||
+        afterPath === undefined ||
+        afterPath === ''
+      ) {
+        stderr('需要两份快照：acr eval --baseline <基准.json> --current <本次.json>\n');
+        return 2;
+      }
+
+      const load = async (path: string): Promise<unknown> =>
+        JSON.parse(await readFile(path, 'utf8')) as unknown;
+      const before = await load(beforePath);
+      const after = await load(afterPath);
+
+      if (!isBaselineSnapshot(before) || !isBaselineSnapshot(after)) {
+        stderr('文件不是有效的基准快照（版本或字段不符）\n');
+        return 1;
+      }
+
+      const comparison = compareBaselines(before, after);
+      stdout(`${formatComparison(comparison)}\n`);
+
+      // 不可比属于「结果无效」，用非零退出让 CI 注意到，而不是打印一段文字了事
+      return comparison.comparable ? 0 : 1;
+    }
+
+    // inspect 在后续任务包实现。现在明确告知，而不是静默成功。
     stderr(`子命令 ${first} 尚未实现\n`);
     return 3;
   } catch (error) {
