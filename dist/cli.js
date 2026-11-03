@@ -10271,6 +10271,111 @@ function formatUsd(value) {
   return `$${value.toExponential(2)}`;
 }
 
+// src/core/reviewers/rules/library.ts
+var BUILTIN_RULES = {
+  entries: [
+    {
+      id: "await-async-calls",
+      title: "\u5F02\u6B65\u8C03\u7528\u5FC5\u987B\u88AB\u7B49\u5F85\u6216\u663E\u5F0F\u5FFD\u7565",
+      instruction: "\u8C03\u7528\u8FD4\u56DE Promise \u7684\u51FD\u6570\u65F6\uFF0C\u8981\u4E48 await / return\uFF0C\u8981\u4E48\u663E\u5F0F\u6807\u6CE8\u4E3A\u4F55\u4E0D\u7B49\u5F85\uFF1B\u88F8\u8C03\u7528\u662F\u7F3A\u9677\u3002",
+      languages: ["*"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    },
+    {
+      id: "early-return",
+      title: "\u4F18\u5148\u65E9\u8FD4\u56DE\uFF0C\u51CF\u5C11\u5D4C\u5957",
+      instruction: "\u80FD\u7528\u65E9\u8FD4\u56DE\u6D88\u6389\u7684\u5D4C\u5957\u5C31\u6D88\u6389\uFF1B\u5224\u65AD\u6761\u4EF6\u5199\u5728\u524D\u9762\uFF0C\u4E3B\u6D41\u7A0B\u4E0D\u8981\u5305\u5728\u4E09\u5C42 if \u91CC\u3002",
+      languages: ["*"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    },
+    {
+      id: "no-empty-catch",
+      title: "\u5F02\u5E38\u4E0D\u5F97\u9759\u9ED8\u541E\u6389",
+      instruction: "catch \u91CC\u81F3\u5C11\u8981\u8BB0\u5F55\u6216\u4E0A\u629B\uFF1B\u53EA\u7559\u4E00\u4E2A\u7A7A\u5757\u4F1A\u8BA9\u7EBF\u4E0A\u95EE\u9898\u5931\u53BB\u552F\u4E00\u7EBF\u7D22\u3002",
+      languages: ["*"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    },
+    {
+      id: "explicit-any",
+      title: "\u7981\u6B62\u7528 any \u9003\u907F\u7C7B\u578B",
+      instruction: "\u4E0D\u8981\u7528 any \u6216 @ts-ignore \u7ED5\u8FC7\u7C7B\u578B\u68C0\u67E5\uFF1B\u786E\u5B9E\u65E0\u6CD5\u8868\u8FBE\u65F6\u7528 unknown \u5E76\u6536\u7A84\u3002",
+      languages: ["typescript"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    },
+    {
+      id: "test-case-focus",
+      title: "\u4E00\u4E2A\u7528\u4F8B\u53EA\u9A8C\u8BC1\u4E00\u4EF6\u4E8B",
+      instruction: "\u5355\u4E2A\u6D4B\u8BD5\u53EA\u65AD\u8A00\u4E00\u4E2A\u884C\u4E3A\uFF1B\u5931\u8D25\u65F6\u8981\u80FD\u4ECE\u540D\u5B57\u76F4\u63A5\u770B\u51FA\u54EA\u6761\u884C\u4E3A\u574F\u4E86\u3002",
+      languages: ["*"],
+      pathPatterns: ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    },
+    {
+      id: "api-boundary-validation",
+      title: "\u63A5\u53E3\u8FB9\u754C\u5FC5\u987B\u6821\u9A8C\u5165\u53C2",
+      instruction: "\u5904\u7406\u5916\u90E8\u8F93\u5165\u7684\u5165\u53E3\u8981\u5148\u6821\u9A8C\u7ED3\u6784\u518D\u4F7F\u7528\uFF1B\u5185\u90E8\u8C03\u7528\u53EF\u4EE5\u4FE1\u4EFB\uFF0C\u8FB9\u754C\u4E0D\u884C\u3002",
+      languages: ["*"],
+      pathPatterns: ["**/api/**", "**/routes/**", "**/controllers/**", "**/handlers/**"],
+      source: { name: "\u672C\u9879\u76EE", url: null, license: "own" }
+    }
+  ]
+};
+var MAX_INJECTED_RULES = 8;
+function languageOf(path) {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  switch (ext) {
+    case "ts":
+    case "tsx":
+      return "typescript";
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "javascript";
+    case "py":
+      return "python";
+    case "go":
+      return "go";
+    case "java":
+      return "java";
+    case "rs":
+      return "rust";
+    default:
+      return "*";
+  }
+}
+function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "").split("").map((part) => part.replace(/\*/g, "[^/]*")).join(".*");
+  return new RegExp(`^${escaped}$`);
+}
+function matchesAny(path, patterns) {
+  return patterns.some((pattern) => globToRegExp(pattern).test(path));
+}
+function selectRules(library, options) {
+  const limit = options.limit ?? MAX_INJECTED_RULES;
+  const path = options.path;
+  const language = path === null ? "*" : languageOf(path);
+  const applicable = library.entries.filter((entry) => {
+    const languageOk = entry.languages.includes("*") || entry.languages.includes(language);
+    if (!languageOk) return false;
+    const patterns = entry.pathPatterns ?? [];
+    if (patterns.length === 0) return true;
+    if (path === null) return false;
+    return matchesAny(path, patterns);
+  });
+  const specificity = (entry) => (entry.pathPatterns ?? []).length > 0 ? 1 : 0;
+  return [...applicable].sort((a, b) => specificity(b) - specificity(a)).slice(0, limit);
+}
+function renderRuleBlock(rules) {
+  if (rules.length === 0) return "";
+  return [
+    "\u4EE5\u4E0B\u89C4\u5219\u662F\u4ED3\u5E93\u7684\u65E2\u6709\u7EA6\u5B9A\uFF0C\u4F5C\u4E3A\u5BA1\u67E5\u4F9D\u636E\uFF1A",
+    ...rules.map((rule) => `- ${rule.instruction}`),
+    "",
+    "\u82E5\u8FD9\u4E9B\u89C4\u5219\u4E0E\u9879\u76EE\u91CC\u5B9E\u9645\u7684\u5199\u6CD5\u51B2\u7A81\uFF0C\u4EE5\u9879\u76EE\u91CC\u7684\u5199\u6CD5\u4E3A\u51C6\u2014\u2014\u4E0D\u8981\u7528\u901A\u7528\u89C4\u8303\u53BB\u5426\u5B9A\u672C\u9879\u76EE\u7684\u4E60\u60EF\u3002"
+  ].join("\n");
+}
+
 // src/core/routing/model-route.ts
 var RISK_PATH_PATTERNS = [
   {
@@ -11803,12 +11908,13 @@ async function runReview(request2, deps) {
   };
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
+    const ruleBlock = renderRuleBlock(selectRules(BUILTIN_RULES, { path: file.path }));
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
         const result = await runWithRetry(
           deps,
           SPECS.correctness,
-          { file: file.path, segments },
+          { file: file.path, segments, ...ruleBlock === "" ? {} : { note: ruleBlock } },
           modelFor("correctness", file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
@@ -11843,7 +11949,7 @@ async function runReview(request2, deps) {
             {
               file: file.path,
               segments,
-              note: `\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`
+              note: [`\u5B89\u5168\u5BA1\u67E5\u539F\u56E0\uFF1A${decision.reasons.join("\u3001")}`, ruleBlock].filter((part) => part !== "").join("\n\n")
             },
             modelFor("security", file.path)
           );
@@ -11883,7 +11989,10 @@ async function runReview(request2, deps) {
           input: {
             file: null,
             segments: globalSegments,
-            note: "\u8FD9\u662F\u5168\u5C40\u89C6\u89D2\uFF0C\u8BF7\u6BD4\u8F83\u4E0D\u540C\u6587\u4EF6\u4E4B\u95F4\u7684\u5199\u6CD5\u662F\u5426\u4E00\u81F4"
+            note: [
+              "\u8FD9\u662F\u5168\u5C40\u89C6\u89D2\uFF0C\u8BF7\u6BD4\u8F83\u4E0D\u540C\u6587\u4EF6\u4E4B\u95F4\u7684\u5199\u6CD5\u662F\u5426\u4E00\u81F4",
+              renderRuleBlock(selectRules(BUILTIN_RULES, { path: null }))
+            ].filter((part) => part !== "").join("\n\n")
           },
           model: modelFor("convention", null),
           temperature: deps.config.llm.temperature,
@@ -19805,7 +19914,7 @@ function compileGlob(pattern) {
 function matchesGlob(path, pattern) {
   return compileGlob(pattern).test(path.replace(/\\/g, "/"));
 }
-function matchesAny(path, patterns) {
+function matchesAny2(path, patterns) {
   return patterns.some((pattern) => matchesGlob(path, pattern));
 }
 
@@ -19944,7 +20053,7 @@ function toDiffFile(raw, skipPaths) {
     oldPath: status === "renamed" ? raw.previousFilename : null,
     status
   });
-  if (matchesAny(raw.filename, skipPaths)) {
+  if (matchesAny2(raw.filename, skipPaths)) {
     return { ...parsed, skippedReason: "\u547D\u4E2D\u8DF3\u8FC7\u6E05\u5355" };
   }
   return parsed;

@@ -37,6 +37,7 @@ import {
 import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
 import { computeCost } from './cost/pricing.js';
+import { BUILTIN_RULES, renderRuleBlock, selectRules } from './reviewers/rules/library.js';
 import { routeModel } from './routing/model-route.js';
 import { renderInlineBody } from './publish/render.js';
 import { renderSummary } from './publish/summary.js';
@@ -263,13 +264,15 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
 
   for (const file of reviewable) {
     const segments = selectForFile(bundle, file.path);
+    // 规则按语言与路径挑，不是全量塞——几百条规范塞进去只会稀释注意力
+    const ruleBlock = renderRuleBlock(selectRules(BUILTIN_RULES, { path: file.path }));
 
     if (dimensions.correctness.enabled && !budgetExhausted) {
       try {
         const result = await runWithRetry(
           deps,
           SPECS.correctness,
-          { file: file.path, segments },
+          { file: file.path, segments, ...(ruleBlock === '' ? {} : { note: ruleBlock }) },
           modelFor('correctness', file.path),
           (input) => {
             const shrunk = shrinkToChangedOnly(input);
@@ -307,7 +310,9 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
             {
               file: file.path,
               segments,
-              note: `安全审查原因：${decision.reasons.join('、')}`,
+              note: [`安全审查原因：${decision.reasons.join('、')}`, ruleBlock]
+                .filter((part) => part !== '')
+                .join('\n\n'),
             },
             modelFor('security', file.path),
           );
@@ -352,7 +357,12 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
           input: {
             file: null,
             segments: globalSegments,
-            note: '这是全局视角，请比较不同文件之间的写法是否一致',
+            note: [
+              '这是全局视角，请比较不同文件之间的写法是否一致',
+              renderRuleBlock(selectRules(BUILTIN_RULES, { path: null })),
+            ]
+              .filter((part) => part !== '')
+              .join('\n\n'),
           },
           model: modelFor('convention', null),
           temperature: deps.config.llm.temperature,
