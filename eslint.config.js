@@ -41,6 +41,9 @@ export default tseslint.config(
         process: 'readonly',
         console: 'readonly',
         URL: 'readonly',
+        // Node 20 起 fetch / Buffer 是全局，不需要 import
+        fetch: 'readonly',
+        Buffer: 'readonly',
       },
     },
   },
