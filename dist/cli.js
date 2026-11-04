@@ -10296,14 +10296,35 @@ function looksLikePlaceholder(raw) {
   if (compact.length === 0) return true;
   const distinct = new Set(compact).size;
   if (distinct < compact.length * 0.3) return true;
+  if (isSingleRun(compact)) return true;
   return /(?:your|placeholder|changeme|dummy|sample|replace[-_]?me)/i.test(compact);
 }
+var ASCENDING = "abcdefghijklmnopqrstuvwxyz0123456789";
+function isSingleRun(text2) {
+  const lower = text2.toLowerCase();
+  if (lower.length < 6) return false;
+  for (const alphabet of [ASCENDING, [...ASCENDING].reverse().join("")]) {
+    let all = true;
+    for (let i = 1; i < lower.length; i += 1) {
+      const prev = alphabet.indexOf(lower[i - 1] ?? "");
+      const next = alphabet.indexOf(lower[i] ?? "");
+      if (prev < 0 || next !== prev + 1) {
+        all = false;
+        break;
+      }
+    }
+    if (all) return true;
+  }
+  return false;
+}
+var ALLOW_MARKER = /acr-allow-secret/i;
 function scanSecrets(diff) {
   const hits = [];
   for (const file of diff.files) {
     if (file.skippedReason !== null) continue;
     for (const line of file.lines) {
       if (line.anchor.kind !== "added" || line.anchor.newLine === null) continue;
+      if (ALLOW_MARKER.test(line.text)) continue;
       for (const { kind, label, pattern } of PATTERNS) {
         const match = pattern.exec(line.text);
         if (match === null) continue;
@@ -14047,13 +14068,16 @@ function describeActions(actions) {
   });
 }
 
+// src/platforms/github/http-status.ts
+function httpStatusOf(error) {
+  if (typeof error !== "object" || error === null) return null;
+  const status = error.status;
+  return typeof status === "number" && status !== 0 ? status : null;
+}
+
 // src/platforms/github/checks.ts
 function stateOf(conclusion) {
   return conclusion === "failure" ? "failure" : "success";
-}
-function statusCodeOf(error) {
-  if (typeof error !== "object" || error === null || !("status" in error)) return null;
-  return Number(error.status ?? 0) || null;
 }
 function createGitHubCheckPort(gateway, ref, defaultName = "AI \u4EE3\u7801\u5BA1\u67E5") {
   return {
@@ -14073,7 +14097,7 @@ function createGitHubCheckPort(gateway, ref, defaultName = "AI \u4EE3\u7801\u5BA
         });
         return { ok: true, commentId: id };
       } catch (error) {
-        const status = statusCodeOf(error);
+        const status = httpStatusOf(error);
         if (status === 403 || status === 404 || status === 401) {
           return await publishStatus(gateway, ref, input, name, status);
         }
@@ -14102,7 +14126,7 @@ async function publishStatus(gateway, ref, input, name, deniedStatus) {
     );
     return { ok: true, commentId: `status:${id}` };
   } catch (error) {
-    const status = statusCodeOf(error);
+    const status = httpStatusOf(error);
     return {
       ok: false,
       failure: {
@@ -21587,6 +21611,13 @@ var App2 = App.defaults({ Octokit: Octokit2 });
 var OAuthApp2 = OAuthApp.defaults({ Octokit: Octokit2 });
 
 // src/platforms/github/client.ts
+function isAlreadyExists(error) {
+  if (httpStatusOf(error) !== 422) return false;
+  const data = error.response?.data;
+  const body = data === void 0 ? "" : JSON.stringify(data);
+  const message = error instanceof Error ? error.message : "";
+  return /already_exists/i.test(`${message} ${body}`);
+}
 function createGitHubGateway(token) {
   const octokit = token === "" ? new Octokit2() : new Octokit2({ auth: token });
   return {
@@ -21786,7 +21817,7 @@ function createGitHubGateway(token) {
           description: "\u4EE3\u7801\u5BA1\u67E5\u5DE5\u5177\u5199\u5165\u7684\u62A5\u544A\u8F7D\u4F53\uFF08\u81EA\u52A8\u521B\u5EFA\uFF09"
         });
       } catch (error) {
-        if (httpStatusOf(error) !== 422) throw error;
+        if (!isAlreadyExists(error)) throw error;
       }
     },
     async createIssue(ref, input) {
@@ -21889,11 +21920,6 @@ function createGitHubGateway(token) {
       await octokit.graphql(mutation, { threadId });
     }
   };
-}
-function httpStatusOf(error) {
-  if (typeof error !== "object" || error === null) return null;
-  const status = error.status;
-  return typeof status === "number" ? status : null;
 }
 
 // src/platforms/github/reports.ts
@@ -22289,13 +22315,24 @@ var RETRYABLE = /* @__PURE__ */ new Set([408, 409, 425, 429, 500, 502, 503, 504]
 var DEFAULT_SLEEP2 = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
-function createFetchTransport(apiKey, extra) {
+function createFetchTransport(apiKey, extra, timeoutMs) {
   return async (url, init) => {
-    const response = await fetch(url, {
-      method: init.method,
-      headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
-      body: init.body
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: init.method,
+        headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
+        body: init.body,
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new Error(`\u6A21\u578B\u8BF7\u6C42\u8D85\u65F6\uFF1A${String(Math.round(timeoutMs / 1e3))} \u79D2\u5185\u6CA1\u6709\u54CD\u5E94`, {
+          cause: error
+        });
+      }
+      throw error;
+    }
     const text2 = await response.text();
     let body = text2;
     try {
@@ -22360,7 +22397,7 @@ function createOpenAiCompatClient(options) {
   const sleep = options.sleep ?? DEFAULT_SLEEP2;
   const maxAttempts = options.maxAttempts ?? 3;
   const baseDelay = options.baseDelayMs ?? 500;
-  const transport = options.transport ?? createFetchTransport(options.apiKey, options.headers ?? {});
+  const transport = options.transport ?? createFetchTransport(options.apiKey, options.headers ?? {}, options.timeoutMs ?? 18e4);
   const endpoint2 = `${options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const initial = options.structuredOutput === void 0 || options.structuredOutput === "auto" ? "json-schema" : options.structuredOutput;
   let mode = initial === "none" ? "none" : initial;

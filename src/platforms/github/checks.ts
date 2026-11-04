@@ -22,15 +22,11 @@
 
 import type { CheckPort, CheckRunInput, WriteResult } from '../types.js';
 import type { GitHubWriteGateway, PullRequestRef } from './client.js';
+import { httpStatusOf } from './http-status.js';
 
 /** 结论到提交状态的映射。neutral 落在 success 上：它本意就是「不阻塞」。 */
 function stateOf(conclusion: CheckRunInput['conclusion']): 'failure' | 'success' {
   return conclusion === 'failure' ? 'failure' : 'success';
-}
-
-function statusCodeOf(error: unknown): number | null {
-  if (typeof error !== 'object' || error === null || !('status' in error)) return null;
-  return Number((error as { status?: unknown }).status ?? 0) || null;
 }
 
 export function createGitHubCheckPort(
@@ -58,7 +54,7 @@ export function createGitHubCheckPort(
         });
         return { ok: true, commentId: id };
       } catch (error) {
-        const status = statusCodeOf(error);
+        const status = httpStatusOf(error);
 
         // 403/404 说明这个令牌写不了 check run（个人令牌注定如此）。
         // 换 commit status 重试——它一样能被分支保护设为必需。
@@ -101,7 +97,7 @@ async function publishStatus(
     // 前缀标注实际用的是哪种方式：注释里说「注解会丢」，不然用户会以为是自己没看到
     return { ok: true, commentId: `status:${id}` };
   } catch (error) {
-    const status = statusCodeOf(error);
+    const status = httpStatusOf(error);
     return {
       ok: false,
       failure: {

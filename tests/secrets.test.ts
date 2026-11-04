@@ -102,3 +102,24 @@ describe('凭证检测', () => {
     expect(scanSecrets(skipped)).toEqual([]);
   });
 });
+
+describe('假凭证的两条豁免路径', () => {
+  it('整串字典序的示例按占位符处理（本项目的脱敏测试夹具就是这种）', () => {
+    expect(scanSecrets(diffOf(['const t = "ghp_abcdefghijklmnopqrstuvwxyz0123";']))).toEqual([]);
+  });
+
+  it('只是「里面含一段连排」的真令牌照报，不能顺手放过', () => {
+    expect(
+      scanSecrets(diffOf(['const t = "github_pat_11ABCDEFG0123456789_abcdefghijklmnop";'])),
+    ).toHaveLength(1);
+  });
+
+  it('作者显式标注 acr-allow-secret 的行不报', () => {
+    const hits = scanSecrets(
+      diffOf([
+        "const k = 'sk-live-7f3a9c2e41b8d6a05e73c9f1a2b4d6e8'; // acr-allow-secret 测试夹具",
+      ]),
+    );
+    expect(hits).toEqual([]);
+  });
+});

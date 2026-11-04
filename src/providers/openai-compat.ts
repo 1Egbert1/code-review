@@ -41,6 +41,14 @@ export interface ClientOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   /** 注入的 HTTP 传输，默认用全局 fetch */
   readonly transport?: HttpTransport;
+  /**
+   * 单次请求的超时（毫秒），默认 180 秒。
+   *
+   * 默认必须有一个：没有超时的 fetch 在连接被中间设备挂住时会**永远不返回**，
+   * 整轮审查就停在那里——命令行看起来在跑，CI 一直占着 runner，日志里什么都没有。
+   * 这比报错难排查得多，因为没有任何可看的东西。
+   */
+  readonly timeoutMs?: number;
 }
 
 /** 值得重试的状态码：限流与服务端临时故障。 */
@@ -55,13 +63,30 @@ const DEFAULT_SLEEP = (ms: number): Promise<void> =>
 function createFetchTransport(
   apiKey: string,
   extra: Readonly<Record<string, string>>,
+  timeoutMs: number,
 ): HttpTransport {
   return async (url, init) => {
-    const response = await fetch(url, {
-      method: init.method,
-      headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
-      body: init.body,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: init.method,
+        headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
+        body: init.body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      // 超时要转成有话说、且**可重试**的错误。原样的 AbortError 既没有状态码也没有说明，
+      // 上层只能看到一个光秃秃的 name；这里补上「多久没响应」和提示
+      if (
+        error instanceof Error &&
+        (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ) {
+        throw new Error(`模型请求超时：${String(Math.round(timeoutMs / 1000))} 秒内没有响应`, {
+          cause: error,
+        });
+      }
+      throw error;
+    }
 
     const text = await response.text();
     let body: unknown = text;
@@ -158,7 +183,8 @@ export function createOpenAiCompatClient(options: ClientOptions): LlmClient {
   const maxAttempts = options.maxAttempts ?? 3;
   const baseDelay = options.baseDelayMs ?? 500;
   const transport =
-    options.transport ?? createFetchTransport(options.apiKey, options.headers ?? {});
+    options.transport ??
+    createFetchTransport(options.apiKey, options.headers ?? {}, options.timeoutMs ?? 180_000);
   const endpoint = `${options.baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
   const initial: StructuredMode =

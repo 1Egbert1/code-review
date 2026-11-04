@@ -20,7 +20,9 @@ describe('错误信息脱敏', () => {
   });
 
   it('抹掉 OpenAI 风格的 key', () => {
-    const safe = redactCredentials('Authorization: Bearer sk-live-7f3a9c2e41b8d6a05e73c9f');
+    const safe = redactCredentials(
+      'Authorization: Bearer sk-live-7f3a9c2e41b8d6a05e73c9f', // acr-allow-secret 测试夹具
+    );
 
     expect(safe).not.toContain('7f3a9c2e41b8d6a05e73c9f');
   });

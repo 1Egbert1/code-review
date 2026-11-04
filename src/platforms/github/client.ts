@@ -10,6 +10,23 @@
 
 import { Octokit } from 'octokit';
 
+import { httpStatusOf } from './http-status.js';
+
+/**
+ * 这个错误是不是「资源已存在」。
+ *
+ * 不能只看状态码：422 也用于「名字非法」「颜色格式不对」。判据要看响应体里的
+ * `errors[].code`，因为 GitHub 在 422 时把具体原因放在那里，而 `message`
+ * 往往只有一句笼统的 `Validation Failed`。
+ */
+function isAlreadyExists(error: unknown): boolean {
+  if (httpStatusOf(error) !== 422) return false;
+  const data = (error as { response?: { data?: unknown } }).response?.data;
+  const body = data === undefined ? '' : JSON.stringify(data);
+  const message = error instanceof Error ? error.message : '';
+  return /already_exists/i.test(`${message} ${body}`);
+}
+
 /** 仓库标识。 */
 export interface RepoRef {
   readonly owner: string;
@@ -465,7 +482,10 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
           description: '代码审查工具写入的报告载体（自动创建）',
         });
       } catch (error) {
-        if (httpStatusOf(error) !== 422) throw error;
+        // 422 不止一种含义：名字非法、颜色格式不对都会 422。
+        // 只有「已存在」算成功，其余必须抛出去——否则标签其实没建出来，
+        // 而调用方以为建好了，下一轮按标签又查不到，去重重新变回每轮新建。
+        if (!isAlreadyExists(error)) throw error;
       }
     },
 
@@ -583,17 +603,4 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
       await octokit.graphql(mutation, { threadId });
     },
   };
-}
-
-/**
- * 取 HTTP 状态码。
- *
- * 不 `import` octokit 的 `RequestError` 来做 `instanceof`：跨包版本重复安装时
- * `instanceof` 会失灵（同一类在不同模块实例里不相等），而状态码是稳定的。
- * 取不到就返回 null，让调用方按「不是预期的那个状态」处理。
- */
-function httpStatusOf(error: unknown): number | null {
-  if (typeof error !== 'object' || error === null) return null;
-  const status = (error as { status?: unknown }).status;
-  return typeof status === 'number' ? status : null;
 }

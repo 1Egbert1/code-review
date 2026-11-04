@@ -83,8 +83,16 @@ const PATTERNS: readonly SecretPattern[] = [
  * 判断命中的是不是占位符。
  *
  * 真实项目里 `sk-your-key-here`、`sk-xxxxxxxxxxxxxxxx` 这类示例很常见，
- * 全报出来会让人立刻关掉这条规则。判据用「不同字符占比」：
- * 真正的密钥是高熵的，占位符往往反复用同一个字符。
+ * 全报出来会让人立刻关掉这条规则。三条判据，都只依赖命中串本身：
+ *
+ * 1. **不同字符占比低** —— 真正的密钥是高熵的，占位符往往反复用同一个字符。
+ * 2. **字典序连排** —— `abcdefghijklmnop`、`0123456789` 这种是手敲的示例，
+ *    真人随机生成不会出现长串连续字符。这条是实测补的：本项目的脱敏测试里
+ *    写着 `ghp_abcdefghijklmnopqrstuvwxyz0123`，熵值够高，被自己的规则当成真令牌拦下了。
+ * 3. **明确写着「填你的密钥」** —— your / placeholder / changeme 一类。
+ *
+ * 不过滤 example：AWS 官方文档里的 AKIAIOSFODNN7EXAMPLE 被大量项目原样复制，
+ * 报出来正好提醒「这是示例值，你得换掉」。
  */
 function looksLikePlaceholder(raw: string): boolean {
   // 去掉已知前缀，只看随机部分
@@ -96,11 +104,44 @@ function looksLikePlaceholder(raw: string): boolean {
   // 少于 30% 的不同字符，基本可以断定是凑长度的占位
   if (distinct < compact.length * 0.3) return true;
 
-  // 明确写着「填你的密钥」的字样也算占位。
-  // 不过滤 example：AWS 官方文档里的 AKIAIOSFODNN7EXAMPLE 被大量项目原样复制，
-  // 报出来正好提醒「这是示例值，你得换掉」。
+  // 整串字典序（含倒序）：abcdef…z0123 这种是手敲的示例。
+  // 只认「整串都是连排」，不认「里面碰巧有一段连排」——后者会误伤真令牌，
+  // 比如 GitHub 的 `github_pat_11ABCDEFG0123456789_abcdefghijklmnop` 里就带着一段。
+  if (isSingleRun(compact)) return true;
+
   return /(?:your|placeholder|changeme|dummy|sample|replace[-_]?me)/i.test(compact);
 }
+
+const ASCENDING = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** 整串是不是同一方向的连续字符（只看去掉前缀后的随机部分）。 */
+function isSingleRun(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (lower.length < 6) return false;
+  for (const alphabet of [ASCENDING, [...ASCENDING].reverse().join('')]) {
+    let all = true;
+    for (let i = 1; i < lower.length; i += 1) {
+      const prev = alphabet.indexOf(lower[i - 1] ?? '');
+      const next = alphabet.indexOf(lower[i] ?? '');
+      if (prev < 0 || next !== prev + 1) {
+        all = false;
+        break;
+      }
+    }
+    if (all) return true;
+  }
+  return false;
+}
+
+/**
+ * 行内允许标注，用来豁免**故意的假凭证**（脱敏测试、文档示例）。
+ *
+ * 为什么需要它：假令牌有时和真令牌一样高熵（`sk-live-7f3a9c2e...`），
+ * 靠启发式永远分不干净。与其猜，不如让作者显式标注——和 gitleaks 的
+ * `gitleaks:allow` 是同一个思路。默认不豁免任何路径：真令牌泄露在测试目录里
+ * 也照样是泄露，所以不给「测试目录整体跳过」这种口子。
+ */
+const ALLOW_MARKER = /acr-allow-secret/i;
 
 /** 扫一遍改动里的新增行。 */
 export function scanSecrets(diff: ParsedDiff): SecretHit[] {
@@ -111,6 +152,8 @@ export function scanSecrets(diff: ParsedDiff): SecretHit[] {
 
     for (const line of file.lines) {
       if (line.anchor.kind !== 'added' || line.anchor.newLine === null) continue;
+      // 作者显式标注「这是假凭证」，不再报。放在模式匹配之前，省掉后面的开销
+      if (ALLOW_MARKER.test(line.text)) continue;
 
       for (const { kind, label, pattern } of PATTERNS) {
         const match = pattern.exec(line.text);
