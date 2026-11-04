@@ -29,7 +29,7 @@ import {
   createGitWikiWriter,
   INSPECTION_LABEL,
 } from '../platforms/github/reports.js';
-import { fetchSnapshot } from '../platforms/github/fetch.js';
+import { fetchCommitSnapshot, fetchSnapshot } from '../platforms/github/fetch.js';
 import { createOpenAiCompatClient } from '../providers/openai-compat.js';
 import { compareBaselines, isBaselineSnapshot } from '../core/eval/baseline.js';
 import { writeReport } from '../core/inspection/carrier.js';
@@ -66,6 +66,7 @@ const USAGE = `acr — AI 代码审查
 常用选项:
   --repo <owner/name>   仓库；也可用环境变量 ACR_REPOSITORY
   --pr <编号>           合并请求编号
+  --commit <sha>        审查单笔提交（与父提交对比）；只支持 dry-run，因为没有评论区可贴
   --files <数量>        cost 用：预计改动文件数
   --lines <数量>        cost 用：预计改动行数
 
@@ -195,17 +196,32 @@ async function runReviewCommand(
     return 3;
   }
 
+  // 两种输入二选一：PR 号，或一笔提交的 sha
+  const commitText = flags['commit'] ?? '';
+  const isCommitMode = commitText !== '';
+
+  if (isCommitMode && !dryRun) {
+    // 提交没有评论区，行内评论无处可贴。与其给一个含糊的失败，不如在入口就说清楚
+    deps.stderr('按提交审查不支持发评论（提交没有评论区），请改用 dry-run\n');
+    return 2;
+  }
+
   const prText = flags['pr'] ?? deps.env['ACR_PULL_REQUEST'];
   const prNumber = prText === undefined || prText === '' ? Number.NaN : Number(prText);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    deps.stderr('缺少合并请求编号：请用 --pr <编号> 指定\n');
+
+  if (!isCommitMode && (!Number.isInteger(prNumber) || prNumber <= 0)) {
+    deps.stderr('缺少审查对象：用 --pr <编号> 审合并请求，或 --commit <sha> 审单笔提交\n');
     return 3;
   }
 
-  const token = deps.env[config.platform.tokenEnv] ?? deps.env['GITHUB_TOKEN'];
-  if (token === undefined || token === '') {
+  const token = deps.env[config.platform.tokenEnv] ?? deps.env['GITHUB_TOKEN'] ?? '';
+  if (token === '' && !dryRun) {
     deps.stderr(`缺少平台令牌：请设置环境变量 ${config.platform.tokenEnv}\n`);
     return 3;
+  }
+  if (token === '') {
+    // 公开仓库可以匿名读，但限速 60 次/小时；一次审查十几个请求，很容易刚好不够
+    deps.stderr('告警：未提供平台令牌，将以匿名身份读取（限速 60 次/小时，可能中途被拦）\n');
   }
 
   const apiKey = deps.env[config.llm.apiKeyEnv];
@@ -217,14 +233,23 @@ async function runReviewCommand(
   const ref = { ...repo, number: prNumber };
   const gateway = createGitHubGateway(token);
 
-  const request: ReviewRequest = {
-    repository: `${repo.owner}/${repo.repo}`,
-    mode: 'pull-request',
-    pullRequestNumber: prNumber,
-    baseRef: null,
-    headRef: null,
-    dryRun,
-  };
+  const request: ReviewRequest = isCommitMode
+    ? {
+        repository: `${repo.owner}/${repo.repo}`,
+        mode: 'commit',
+        pullRequestNumber: null,
+        baseRef: null,
+        headRef: commitText,
+        dryRun,
+      }
+    : {
+        repository: `${repo.owner}/${repo.repo}`,
+        mode: 'pull-request',
+        pullRequestNumber: prNumber,
+        baseRef: null,
+        headRef: null,
+        dryRun,
+      };
 
   const client = createOpenAiCompatClient({
     baseUrl: config.llm.baseUrl,
@@ -239,13 +264,18 @@ async function runReviewCommand(
     config,
     client,
     fetchSnapshot: async () => {
-      headSha = await gateway.getPullRequestHeadSha(ref);
-      const fetched = await fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
+      const fetched = isCommitMode
+        ? await fetchCommitSnapshot(gateway, repo, commitText, config.review.skipPaths)
+        : await (async () => {
+            headSha = await gateway.getPullRequestHeadSha(ref);
+            return fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
+          })();
+
       for (const warning of fetched.warnings) deps.stderr(`告警：${warning.message}\n`);
       return fetched.snapshot;
     },
     // 只打印模式不创建写入端口：没有端口就不可能发出写请求
-    port: dryRun ? null : createGitHubCommentPort(gateway, ref, headSha),
+    port: dryRun || isCommitMode ? null : createGitHubCommentPort(gateway, ref, headSha),
     onProgress: (message) => {
       deps.stdout(`${message}\n`);
     },

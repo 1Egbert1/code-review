@@ -141,3 +141,30 @@ describe('eval 子命令', () => {
     expect(box.stderr()).toContain('不是有效的基准快照');
   });
 });
+
+describe('审查对象参数', () => {
+  it('既没有 --pr 也没有 --commit 时返回 3，并说明两种用法', async () => {
+    const box = harness();
+    expect(await main(['dry-run', '--repo', 'a/b'], box.deps)).toBe(3);
+    expect(box.stderr()).toContain('--commit');
+  });
+
+  it('--commit 配 review 子命令被拒绝：提交没有评论区可贴', async () => {
+    const box = harness();
+    // 用 2（用法错误）而不是 3（缺信息）：这不是少给了东西，是这个组合本身不成立
+    expect(await main(['review', '--repo', 'a/b', '--commit', 'abc123'], box.deps)).toBe(2);
+    expect(box.stderr()).toContain('不支持发评论');
+  });
+
+  it('--commit 配 dry-run 可以通过参数校验，卡在缺模型密钥', async () => {
+    const box = harness();
+    expect(await main(['dry-run', '--repo', 'a/b', '--commit', 'abc123'], box.deps)).toBe(3);
+    expect(box.stderr()).toContain('缺少模型密钥');
+  });
+
+  it('没有平台令牌时只告警不阻断（公开仓库可匿名读）', async () => {
+    const box = harness();
+    await main(['dry-run', '--repo', 'a/b', '--commit', 'abc123'], box.deps);
+    expect(box.stderr()).toContain('匿名');
+  });
+});

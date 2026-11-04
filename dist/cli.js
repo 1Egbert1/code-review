@@ -12590,7 +12590,7 @@ var OUTPUT_CONTRACT = `## \u8F93\u51FA
 - \u6CA1\u6709\u53D1\u73B0\u95EE\u9898\u65F6\u8F93\u51FA {"findings":[]}\u3002\u4E0D\u8981\u4E3A\u4E86\u51D1\u6570\u7F16\u9020\u95EE\u9898\u3002`;
 
 // src/core/reviewers/dimensions/convention/prompt.ts
-var PROMPT_VERSION = "v1.0";
+var PROMPT_VERSION = "v1.1";
 var SYSTEM_PROMPT = `\u4F60\u662F\u4E00\u540D\u4EE3\u7801\u89C4\u8303\u5BA1\u67E5\u5458\u3002\u4F60\u53EA\u8D1F\u8D23\u4E00\u4EF6\u4E8B\uFF1A**\u8FD9\u6BB5\u6539\u52A8\u548C\u9879\u76EE\u65E2\u6709\u7684\u5199\u6CD5\u662F\u5426\u4E00\u81F4**\u3002
 
 ## \u5224\u65AD\u4F9D\u636E\u7684\u4F18\u5148\u7EA7\uFF08\u4E25\u683C\u6267\u884C\uFF09
@@ -12615,6 +12615,21 @@ var SYSTEM_PROMPT = `\u4F60\u662F\u4E00\u540D\u4EE3\u7801\u89C4\u8303\u5BA1\u67E
   \uFF08\u8FD9\u4E9B\u5DF2\u6709\u5DE5\u5177\u5728\u7BA1\uFF0C\u518D\u8BF4\u4E00\u904D\u53EA\u4F1A\u8BA9\u4EBA\u5173\u6389\u8FD9\u4E2A\u529F\u80FD\uFF09
 - \u7EAF\u4E2A\u4EBA\u504F\u597D\uFF1A\u300C\u6211\u89C9\u5F97\u8FD9\u4E2A\u540D\u5B57\u66F4\u597D\u300D\u300C\u5EFA\u8BAE\u52A0\u6CE8\u91CA\u300D
 - \u4E0E\u672C\u6B21\u6539\u52A8\u65E0\u5173\u7684\u5B58\u91CF\u98CE\u683C\u95EE\u9898
+
+## category \u5B57\u6BB5\uFF08\u586B\u9519\u7B49\u4E8E\u6CA1\u62A5\uFF09
+
+\u4E0A\u9762\u90A3\u4E9B\u4E2D\u6587\u540D\u53EA\u662F\u7ED9\u4F60\u7406\u89E3\u7528\u7684\u3002category \u5B57\u6BB5**\u5FC5\u987B\u586B\u4E0B\u8868\u7684\u82F1\u6587\u503C**\uFF1A
+
+| \u4F60\u5224\u65AD\u7684\u662F | \u586B |
+| --- | --- |
+| \u547D\u540D\u4E0D\u4E00\u81F4 | naming |
+| \u7ED3\u6784\u95EE\u9898 | structure |
+| \u540C\u4E00\u6279\u6539\u52A8\u5185\u7684\u5199\u6CD5\u4E0D\u4E00\u81F4 | consistency |
+| \u91CD\u590D\u903B\u8F91 | duplication |
+| \u4E0E\u9879\u76EE\u7EA6\u5B9A\u7684\u5199\u6CD5\u51B2\u7A81 | convention |
+
+\u5199\u6210\u4E2D\u6587\u4F1A\u88AB\u5B57\u6BB5\u6821\u9A8C\u76F4\u63A5\u62D2\u7EDD\uFF1A\u4E0D\u662F\u964D\u7EA7\u3001\u4E0D\u662F\u8B66\u544A\uFF0C\u662F**\u6574\u6761\u7ED3\u8BBA\u88AB\u4E22\u6389**\u3002
+\u5B81\u53EF\u5C11\u62A5\u4E00\u6761\uFF0C\u4E5F\u4E0D\u8981\u7528\u4E2D\u6587\u53BB\u78B0\u8FD0\u6C14\u2014\u2014\u4E22\u6389\u7684\u6761\u76EE\u4F5C\u8005\u6C38\u8FDC\u770B\u4E0D\u5230\u3002
 
 ## \u8BC1\u636E\u89C4\u5219
 
@@ -12749,7 +12764,7 @@ function routeForSecurity(input) {
 }
 
 // src/core/reviewers/dimensions/correctness/prompt.ts
-var PROMPT_VERSION2 = "v1.0";
+var PROMPT_VERSION2 = "v1.1";
 var SYSTEM_PROMPT2 = `\u4F60\u662F\u4E00\u540D\u4E25\u8C28\u7684\u4EE3\u7801\u5BA1\u67E5\u5458\uFF0C\u53EA\u8D1F\u8D23\u4E00\u4EF6\u4E8B\uFF1A**\u8FD9\u6BB5\u4EE3\u7801\u5728\u4EC0\u4E48\u60C5\u51B5\u4E0B\u4F1A\u51FA\u9519**\u3002
 
 \u4F60\u5BA1\u7684\u662F\u672C\u6B21\u6539\u52A8\u3002\u6539\u52A8\u4E4B\u5916\u7684\u4EE3\u7801\u53EA\u662F\u80CC\u666F\u6750\u6599\uFF0C\u4E0D\u9700\u8981\u4F60\u5BF9\u5B83\u53D1\u8868\u610F\u89C1\u3002
@@ -12773,6 +12788,22 @@ var SYSTEM_PROMPT2 = `\u4F60\u662F\u4E00\u540D\u4E25\u8C28\u7684\u4EE3\u7801\u5B
 - \u4EFB\u4F55\u6CA1\u6709\u5177\u4F53\u89E6\u53D1\u6761\u4EF6\u7684\u300C\u5EFA\u8BAE\u2026\u300D
 
 \u5224\u5B9A\u6807\u51C6\u5F88\u7B80\u5355\uFF1A**\u5982\u679C\u4F5C\u8005\u53CD\u95EE\u4F60\u300C\u4F60\u8BF4\u4EC0\u4E48\u60C5\u51B5\u4E0B\u4F1A\u51FA\u95EE\u9898\u300D\uFF0C\u4F60\u7B54\u4E0D\u4E0A\u6765\uFF0C\u5C31\u4E0D\u8981\u62A5\u3002**
+
+## category \u5B57\u6BB5\uFF08\u586B\u9519\u7B49\u4E8E\u6CA1\u62A5\uFF09
+
+\u4E0A\u9762\u90A3\u4E9B\u4E2D\u6587\u540D\u53EA\u662F\u7ED9\u4F60\u7406\u89E3\u7528\u7684\u3002category \u5B57\u6BB5**\u5FC5\u987B\u586B\u4E0B\u8868\u7684\u82F1\u6587\u503C**\uFF1A
+
+| \u4F60\u5224\u65AD\u7684\u662F | \u586B |
+| --- | --- |
+| \u7A7A\u503C | null-safety |
+| \u8D8A\u754C | boundary |
+| \u5E76\u53D1 | concurrency |
+| \u5F02\u5E38 | error-handling |
+| \u8D44\u6E90 | resource |
+| \u903B\u8F91 | logic |
+
+\u5199\u6210\u4E2D\u6587\u4F1A\u88AB\u5B57\u6BB5\u6821\u9A8C\u76F4\u63A5\u62D2\u7EDD\uFF1A\u4E0D\u662F\u964D\u7EA7\u3001\u4E0D\u662F\u8B66\u544A\uFF0C\u662F**\u6574\u6761\u7ED3\u8BBA\u88AB\u4E22\u6389**\u3002
+\u5B81\u53EF\u5C11\u62A5\u4E00\u6761\uFF0C\u4E5F\u4E0D\u8981\u7528\u4E2D\u6587\u53BB\u78B0\u8FD0\u6C14\u2014\u2014\u4E22\u6389\u7684\u6761\u76EE\u4F5C\u8005\u6C38\u8FDC\u770B\u4E0D\u5230\u3002
 
 ## \u8BC1\u636E\u89C4\u5219\uFF08\u6700\u91CD\u8981\uFF09
 
@@ -12817,7 +12848,7 @@ ${OUTPUT_CONTRACT}`,
 };
 
 // src/core/reviewers/dimensions/security/prompt.ts
-var PROMPT_VERSION3 = "v1.0";
+var PROMPT_VERSION3 = "v1.1";
 var SYSTEM_PROMPT3 = `\u4F60\u662F\u4E00\u540D\u5E94\u7528\u5B89\u5168\u5BA1\u67E5\u5458\u3002\u4F60\u53EA\u8D1F\u8D23\u4E00\u4EF6\u4E8B\uFF1A**\u8FD9\u6BB5\u6539\u52A8\u80FD\u4E0D\u80FD\u88AB\u653B\u51FB\u8005\u5229\u7528**\u3002
 
 \u5224\u5B9A\u6807\u51C6\u662F\u300C\u80FD\u4E0D\u80FD\u88AB\u5229\u7528\u300D\uFF0C\u4E0D\u662F\u300C\u4EE3\u7801\u5199\u5F97\u597D\u4E0D\u597D\u300D\u3002\u4E00\u6761\u95EE\u9898\u62A5\u51FA\u6765\u65F6\uFF0C\u4F60\u8981\u80FD\u8BF4\u6E05\u653B\u51FB\u8005\u662F\u8C01\u3001\u505A\u4EC0\u4E48\u64CD\u4F5C\u3001\u5F97\u5230\u4EC0\u4E48\u3002
@@ -12844,6 +12875,24 @@ var SYSTEM_PROMPT3 = `\u4F60\u662F\u4E00\u540D\u5E94\u7528\u5B89\u5168\u5BA1\u67
 - \u53EA\u662F\u300C\u770B\u8D77\u6765\u4E0D\u5B89\u5168\u300D\u4F46\u7ED9\u4E0D\u51FA\u5229\u7528\u8DEF\u5F84\u7684
 - \u547D\u540D\u3001\u683C\u5F0F\u3001\u590D\u6742\u5EA6
 - \u4F9D\u8D56\u7248\u672C\u8FC7\u671F\uFF08\u9664\u975E\u4F60\u80FD\u6307\u51FA\u8FD9\u662F\u4E00\u4E2A\u5DF2\u77E5\u53EF\u88AB\u5229\u7528\u7684\u6F0F\u6D1E\uFF0C\u5E76\u4E14\u8BF4\u5F97\u51FA\u5F71\u54CD\u9762\uFF09
+
+## category \u5B57\u6BB5\uFF08\u586B\u9519\u7B49\u4E8E\u6CA1\u62A5\uFF09
+
+\u4E0A\u9762\u90A3\u4E9B\u4E2D\u6587\u540D\u53EA\u662F\u7ED9\u4F60\u7406\u89E3\u7528\u7684\u3002category \u5B57\u6BB5**\u5FC5\u987B\u586B\u4E0B\u8868\u7684\u82F1\u6587\u503C**\uFF1A
+
+| \u4F60\u5224\u65AD\u7684\u662F | \u586B |
+| --- | --- |
+| \u8D8A\u6743\u3001\u6743\u9650\u6821\u9A8C\u7F3A\u5931 | authz |
+| \u6CE8\u5165\uFF08SQL / \u547D\u4EE4 / \u6A21\u677F / \u8868\u8FBE\u5F0F\uFF09 | injection |
+| \u51ED\u8BC1\u6216\u654F\u611F\u4FE1\u606F\u66B4\u9732 | secret-exposure |
+| \u8DEF\u5F84\u7A7F\u8D8A | path-traversal |
+| SSRF | ssrf |
+| \u4E0D\u5B89\u5168\u7684\u53CD\u5E8F\u5217\u5316 | unsafe-deserialization |
+| \u52A0\u5BC6\u65B9\u5F0F\u8BEF\u7528 | crypto-misuse |
+| \u524D\u7AEF\u4FA7\u7684\u6570\u636E\u6216\u6743\u9650\u66B4\u9732 | frontend-exposure |
+
+\u5199\u6210\u4E2D\u6587\u4F1A\u88AB\u5B57\u6BB5\u6821\u9A8C\u76F4\u63A5\u62D2\u7EDD\uFF1A\u4E0D\u662F\u964D\u7EA7\u3001\u4E0D\u662F\u8B66\u544A\uFF0C\u662F**\u6574\u6761\u7ED3\u8BBA\u88AB\u4E22\u6389**\u3002
+\u5B81\u53EF\u5C11\u62A5\u4E00\u6761\uFF0C\u4E5F\u4E0D\u8981\u7528\u4E2D\u6587\u53BB\u78B0\u8FD0\u6C14\u2014\u2014\u4E22\u6389\u7684\u6761\u76EE\u4F5C\u8005\u6C38\u8FDC\u770B\u4E0D\u5230\u3002
 
 ## \u8BC1\u636E\u89C4\u5219
 
@@ -21341,7 +21390,7 @@ var OAuthApp2 = OAuthApp.defaults({ Octokit: Octokit2 });
 
 // src/platforms/github/client.ts
 function createGitHubGateway(token) {
-  const octokit = new Octokit2({ auth: token });
+  const octokit = token === "" ? new Octokit2() : new Octokit2({ auth: token });
   return {
     async listPullRequestFiles(ref) {
       const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -21397,6 +21446,35 @@ function createGitHubGateway(token) {
         hasWiki: response.data.has_wiki === true,
         defaultBranch: response.data.default_branch
       };
+    },
+    async getCommit(ref, sha) {
+      const response = await octokit.rest.repos.getCommit({
+        owner: ref.owner,
+        repo: ref.repo,
+        ref: sha
+      });
+      return {
+        sha: response.data.sha,
+        parentSha: response.data.parents[0]?.sha ?? null,
+        summary: (response.data.commit.message ?? "").split("\n")[0] ?? ""
+      };
+    },
+    async compareCommits(ref, base, head) {
+      const response = await octokit.rest.repos.compareCommitsWithBasehead({
+        owner: ref.owner,
+        repo: ref.repo,
+        basehead: `${base}...${head}`,
+        // compare 端点的 files 不分页，一次最多给 100 个；超出的由调用方告警，不静默丢
+        per_page: 100
+      });
+      return (response.data.files ?? []).map((file) => ({
+        filename: file.filename,
+        previousFilename: file.previous_filename ?? null,
+        status: file.status,
+        patch: file.patch ?? null,
+        additions: file.additions,
+        deletions: file.deletions
+      }));
     },
     async getPullRequestHeadSha(ref) {
       const response = await octokit.rest.pulls.get({
@@ -21876,6 +21954,38 @@ async function fetchSnapshot(gateway, ref, headSha, skipPaths = []) {
       fileContents,
       existingComments,
       // SPEC-GAP：仓库约定文件与构建上下文在 T-06（上下文装配）补齐
+      conventions: null,
+      buildContext: null
+    },
+    warnings
+  };
+}
+async function fetchCommitSnapshot(gateway, repoRef, sha, skipPaths = []) {
+  const warnings = [];
+  const commit = await gateway.getCommit(repoRef, sha);
+  if (commit.parentSha === null) {
+    throw new Error(`\u63D0\u4EA4 ${sha.slice(0, 7)} \u662F\u6839\u63D0\u4EA4\uFF0C\u6CA1\u6709\u53EF\u5BF9\u6BD4\u7684\u7236\u63D0\u4EA4`);
+  }
+  const rawFiles = await gateway.compareCommits(repoRef, commit.parentSha, commit.sha);
+  if (rawFiles.length >= 100) {
+    warnings.push({
+      kind: "other",
+      message: "\u6539\u52A8\u6587\u4EF6\u8FBE\u5230\u5E73\u53F0\u5355\u6B21\u4E0A\u9650 100 \u4E2A\uFF0C\u8D85\u51FA\u7684\u6587\u4EF6\u672A\u7EB3\u5165\u672C\u6B21\u5BA1\u67E5",
+      target: null
+    });
+  }
+  const files = rawFiles.map((raw) => toDiffFile(raw, skipPaths));
+  const fileContents = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    if (file.skippedReason !== null) continue;
+    fileContents.set(file.path, await gateway.getFileContent(repoRef, file.path, commit.sha));
+  }
+  return {
+    snapshot: {
+      diff: { files, baseSha: commit.parentSha, headSha: commit.sha },
+      fileContents,
+      // 提交没有评论区，这里恒为空数组——不是「没读到」，是「不存在」
+      existingComments: [],
       conventions: null,
       buildContext: null
     },
@@ -23000,14 +23110,25 @@ function originSection(findings) {
   const parts = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([origin, count]) => `${ORIGIN_LABEL[origin] ?? origin} ${String(count)}`);
   return `\u5B9A\u4F4D\u6765\u6E90\uFF1A${parts.length === 0 ? "\uFF08\u65E0\uFF09" : parts.join("\uFF0C")}`;
 }
-function rejectionSection(result) {
+function rejectionSection(result, verbose) {
   if (result.rejections.length === 0) return [];
   const counts = /* @__PURE__ */ new Map();
   for (const rejection of result.rejections) {
     counts.set(rejection.reason, (counts.get(rejection.reason) ?? 0) + 1);
   }
   const detail = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([reason, count]) => `${REASON_LABEL[reason]} ${String(count)}`).join("\uFF0C");
-  return [`\u4E22\u5F03 ${String(result.rejections.length)} \u6761`, `  \u4E22\u5F03\u539F\u56E0\uFF1A${detail}`];
+  const lines = [`\u4E22\u5F03 ${String(result.rejections.length)} \u6761`, `  \u4E22\u5F03\u539F\u56E0\uFF1A${detail}`];
+  if (verbose) {
+    for (const rejection of result.rejections.slice(0, 10)) {
+      const where = `${rejection.file}:${String(rejection.line)}`;
+      lines.push(`  \xB7 [${rejection.reviewer}] ${where} ${rejection.title.slice(0, 50)}`);
+      lines.push(`    \u539F\u56E0\uFF1A${rejection.detail}`);
+    }
+    if (result.rejections.length > 10) {
+      lines.push(`  \xB7 \u53E6\u6709 ${String(result.rejections.length - 10)} \u6761\u672A\u5217\u51FA`);
+    }
+  }
+  return lines;
 }
 function formatStats(input) {
   const { result } = input;
@@ -23041,7 +23162,7 @@ function formatStats(input) {
     lines.push(`\u6210\u672C\u6784\u6210\uFF1A${parts.join(" \xB7 ")}`);
   }
   lines.push(originSection(result.findings));
-  lines.push(...rejectionSection(result));
+  lines.push(...rejectionSection(result, input.dryRun));
   lines.push("\u884C\u5185 + \u6458\u8981\u5408\u8BA1\u672A\u4E22\u4EFB\u4F55\u901A\u8FC7\u6821\u9A8C\u7684\u6761\u76EE");
   lines.push(
     `\u8986\u76D6\u7387\uFF1A\u8BA1\u5212 ${String(result.coverage.planned)} / \u5B8C\u6210 ${String(result.coverage.completed)} / \u8DF3\u8FC7 ${String(result.coverage.skipped)}`
@@ -23100,6 +23221,7 @@ var USAGE = `acr \u2014 AI \u4EE3\u7801\u5BA1\u67E5
 \u5E38\u7528\u9009\u9879:
   --repo <owner/name>   \u4ED3\u5E93\uFF1B\u4E5F\u53EF\u7528\u73AF\u5883\u53D8\u91CF ACR_REPOSITORY
   --pr <\u7F16\u53F7>           \u5408\u5E76\u8BF7\u6C42\u7F16\u53F7
+  --commit <sha>        \u5BA1\u67E5\u5355\u7B14\u63D0\u4EA4\uFF08\u4E0E\u7236\u63D0\u4EA4\u5BF9\u6BD4\uFF09\uFF1B\u53EA\u652F\u6301 dry-run\uFF0C\u56E0\u4E3A\u6CA1\u6709\u8BC4\u8BBA\u533A\u53EF\u8D34
   --files <\u6570\u91CF>        cost \u7528\uFF1A\u9884\u8BA1\u6539\u52A8\u6587\u4EF6\u6570
   --lines <\u6570\u91CF>        cost \u7528\uFF1A\u9884\u8BA1\u6539\u52A8\u884C\u6570
 
@@ -23184,17 +23306,26 @@ async function runReviewCommand(flags, deps, dryRun) {
     deps.stderr("\u7F3A\u5C11\u4ED3\u5E93\uFF1A\u8BF7\u7528 --repo owner/name \u6307\u5B9A\uFF0C\u6216\u8BBE\u7F6E ACR_REPOSITORY\n");
     return 3;
   }
+  const commitText = flags["commit"] ?? "";
+  const isCommitMode = commitText !== "";
+  if (isCommitMode && !dryRun) {
+    deps.stderr("\u6309\u63D0\u4EA4\u5BA1\u67E5\u4E0D\u652F\u6301\u53D1\u8BC4\u8BBA\uFF08\u63D0\u4EA4\u6CA1\u6709\u8BC4\u8BBA\u533A\uFF09\uFF0C\u8BF7\u6539\u7528 dry-run\n");
+    return 2;
+  }
   const prText = flags["pr"] ?? deps.env["ACR_PULL_REQUEST"];
   const prNumber = prText === void 0 || prText === "" ? Number.NaN : Number(prText);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    deps.stderr("\u7F3A\u5C11\u5408\u5E76\u8BF7\u6C42\u7F16\u53F7\uFF1A\u8BF7\u7528 --pr <\u7F16\u53F7> \u6307\u5B9A\n");
+  if (!isCommitMode && (!Number.isInteger(prNumber) || prNumber <= 0)) {
+    deps.stderr("\u7F3A\u5C11\u5BA1\u67E5\u5BF9\u8C61\uFF1A\u7528 --pr <\u7F16\u53F7> \u5BA1\u5408\u5E76\u8BF7\u6C42\uFF0C\u6216 --commit <sha> \u5BA1\u5355\u7B14\u63D0\u4EA4\n");
     return 3;
   }
-  const token = deps.env[config.platform.tokenEnv] ?? deps.env["GITHUB_TOKEN"];
-  if (token === void 0 || token === "") {
+  const token = deps.env[config.platform.tokenEnv] ?? deps.env["GITHUB_TOKEN"] ?? "";
+  if (token === "" && !dryRun) {
     deps.stderr(`\u7F3A\u5C11\u5E73\u53F0\u4EE4\u724C\uFF1A\u8BF7\u8BBE\u7F6E\u73AF\u5883\u53D8\u91CF ${config.platform.tokenEnv}
 `);
     return 3;
+  }
+  if (token === "") {
+    deps.stderr("\u544A\u8B66\uFF1A\u672A\u63D0\u4F9B\u5E73\u53F0\u4EE4\u724C\uFF0C\u5C06\u4EE5\u533F\u540D\u8EAB\u4EFD\u8BFB\u53D6\uFF08\u9650\u901F 60 \u6B21/\u5C0F\u65F6\uFF0C\u53EF\u80FD\u4E2D\u9014\u88AB\u62E6\uFF09\n");
   }
   const apiKey = deps.env[config.llm.apiKeyEnv];
   if (apiKey === void 0 || apiKey === "") {
@@ -23204,7 +23335,14 @@ async function runReviewCommand(flags, deps, dryRun) {
   }
   const ref = { ...repo, number: prNumber };
   const gateway = createGitHubGateway(token);
-  const request2 = {
+  const request2 = isCommitMode ? {
+    repository: `${repo.owner}/${repo.repo}`,
+    mode: "commit",
+    pullRequestNumber: null,
+    baseRef: null,
+    headRef: commitText,
+    dryRun
+  } : {
     repository: `${repo.owner}/${repo.repo}`,
     mode: "pull-request",
     pullRequestNumber: prNumber,
@@ -23223,14 +23361,16 @@ async function runReviewCommand(flags, deps, dryRun) {
     config,
     client,
     fetchSnapshot: async () => {
-      headSha = await gateway.getPullRequestHeadSha(ref);
-      const fetched = await fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
+      const fetched = isCommitMode ? await fetchCommitSnapshot(gateway, repo, commitText, config.review.skipPaths) : await (async () => {
+        headSha = await gateway.getPullRequestHeadSha(ref);
+        return fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
+      })();
       for (const warning of fetched.warnings) deps.stderr(`\u544A\u8B66\uFF1A${warning.message}
 `);
       return fetched.snapshot;
     },
     // 只打印模式不创建写入端口：没有端口就不可能发出写请求
-    port: dryRun ? null : createGitHubCommentPort(gateway, ref, headSha),
+    port: dryRun || isCommitMode ? null : createGitHubCommentPort(gateway, ref, headSha),
     onProgress: (message) => {
       deps.stdout(`${message}
 `);

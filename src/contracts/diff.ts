@@ -10,8 +10,13 @@
 export interface ReviewRequest {
   /** 仓库全名，形如 owner/repo */
   readonly repository: string;
-  /** 运行模式：远端合并请求 / 本地引用对比 / 项目巡检 */
-  readonly mode: 'pull-request' | 'local' | 'inspection';
+  /**
+   * 运行模式。
+   *
+   * `commit` 是「审一笔提交」：用它与父提交的差异当作改动。
+   * 它没有 PR 上下文，因此**发不了行内评论**，只用来跑 dry-run。
+   */
+  readonly mode: 'pull-request' | 'commit' | 'local' | 'inspection';
   /** 合并请求号；非 pull-request 模式为 null */
   readonly pullRequestNumber: number | null;
   /** 本地模式的对比基准引用（如 origin/main）；非 local 模式为 null */

@@ -44,6 +44,15 @@ export interface RawReviewComment {
   readonly side: 'LEFT' | 'RIGHT' | null;
 }
 
+/** 一笔提交的概要。 */
+export interface CommitInfo {
+  readonly sha: string;
+  /** 父提交；根提交为 null（此时没有可对比的基准） */
+  readonly parentSha: string | null;
+  /** 首行提交信息，用于展示 */
+  readonly summary: string;
+}
+
 /** 仓库元信息。 */
 export interface RepoInfo {
   /** 是否开启 Wiki，决定巡检报告能否写到 Wiki（见 16.3） */
@@ -57,7 +66,7 @@ export interface GitHubGateway {
   listPullRequestFiles(ref: PullRequestRef): Promise<readonly RawFileChange[]>;
 
   /** 取某文件在指定引用下的完整内容；取不到（超大、目录、非文本）时返回 null */
-  getFileContent(ref: PullRequestRef, path: string, gitRef: string): Promise<string | null>;
+  getFileContent(ref: RepoRef, path: string, gitRef: string): Promise<string | null>;
 
   /** 列出合并请求上已有的评审评论（自动翻页） */
   listReviewComments(ref: PullRequestRef): Promise<readonly RawReviewComment[]>;
@@ -72,6 +81,16 @@ export interface GitHubGateway {
    * 在新提交推上来之后会把评论贴到错误的提交上。
    */
   getPullRequestHeadSha(ref: PullRequestRef): Promise<string>;
+
+  /** 读一笔提交的元信息。审 commit 时要用它的父提交作为对比基准。 */
+  getCommit(ref: RepoRef, sha: string): Promise<CommitInfo>;
+
+  /**
+   * 列出两个提交之间的文件改动，形状与 PR 的文件列表一致。
+   *
+   * 这条路径**拿不到已有评论**——提交没有评论区，所以「审一笔提交」只能跑 dry-run。
+   */
+  compareCommits(ref: RepoRef, base: string, head: string): Promise<readonly RawFileChange[]>;
 }
 
 /**
@@ -176,7 +195,8 @@ export interface RawIssue {
  * 注意：这里不做令牌校验——校验由凭证模块负责，本函数只负责组装。
  */
 export function createGitHubGateway(token: string): GitHubFullGateway {
-  const octokit = new Octokit({ auth: token });
+  // 空令牌＝匿名访问。公开仓库读得动，但限速 60 次/小时，只适合临时试一次
+  const octokit = token === '' ? new Octokit() : new Octokit({ auth: token });
 
   return {
     async listPullRequestFiles(ref) {
@@ -244,6 +264,38 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
         hasWiki: response.data.has_wiki === true,
         defaultBranch: response.data.default_branch,
       };
+    },
+
+    async getCommit(ref, sha) {
+      const response = await octokit.rest.repos.getCommit({
+        owner: ref.owner,
+        repo: ref.repo,
+        ref: sha,
+      });
+      return {
+        sha: response.data.sha,
+        parentSha: response.data.parents[0]?.sha ?? null,
+        summary: (response.data.commit.message ?? '').split('\n')[0] ?? '',
+      };
+    },
+
+    async compareCommits(ref, base, head) {
+      const response = await octokit.rest.repos.compareCommitsWithBasehead({
+        owner: ref.owner,
+        repo: ref.repo,
+        basehead: `${base}...${head}`,
+        // compare 端点的 files 不分页，一次最多给 100 个；超出的由调用方告警，不静默丢
+        per_page: 100,
+      });
+
+      return (response.data.files ?? []).map((file) => ({
+        filename: file.filename,
+        previousFilename: file.previous_filename ?? null,
+        status: file.status,
+        patch: file.patch ?? null,
+        additions: file.additions,
+        deletions: file.deletions,
+      }));
     },
 
     async getPullRequestHeadSha(ref) {

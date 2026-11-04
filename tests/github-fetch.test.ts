@@ -8,7 +8,7 @@ import type {
   RawFileChange,
   RawReviewComment,
 } from '../src/platforms/github/client.js';
-import { fetchSnapshot } from '../src/platforms/github/fetch.js';
+import { fetchCommitSnapshot, fetchSnapshot } from '../src/platforms/github/fetch.js';
 
 const REF: PullRequestRef = { owner: 'acme', repo: 'web', number: 7 };
 
@@ -35,6 +35,8 @@ function gateway(overrides: Partial<GitHubGateway> = {}): GitHubGateway {
     listReviewComments: async () => [],
     getRepoInfo: async () => ({ hasWiki: false, defaultBranch: 'main' }),
     getPullRequestHeadSha: async () => 'head-sha',
+    getCommit: async () => ({ sha: 'head-sha', parentSha: 'base-sha', summary: '提交' }),
+    compareCommits: async () => [],
     ...overrides,
   };
 }
@@ -206,5 +208,74 @@ describe('取数：失败路径', () => {
   it('一切正常时没有告警', async () => {
     const result = await fetchSnapshot(gateway(), REF, 'sha');
     expect(result.warnings).toHaveLength(0);
+  });
+});
+
+describe('按提交取数', () => {
+  const REPO = { owner: 'o', repo: 'r' };
+
+  it('基准取父提交，头部取该提交自身', async () => {
+    const result = await fetchCommitSnapshot(
+      gateway({
+        getCommit: async () => ({ sha: 'head', parentSha: 'parent', summary: '改了点东西' }),
+        compareCommits: async (_ref, base, head) => {
+          expect(base).toBe('parent');
+          expect(head).toBe('head');
+          return [file({ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b' })];
+        },
+      }),
+      REPO,
+      'head',
+    );
+
+    expect(result.snapshot.diff.baseSha).toBe('parent');
+    expect(result.snapshot.diff.headSha).toBe('head');
+    expect(result.snapshot.diff.files).toHaveLength(1);
+  });
+
+  it('提交没有评论区，已有评论恒为空', async () => {
+    const result = await fetchCommitSnapshot(gateway(), REPO, 'head');
+    expect(result.snapshot.existingComments).toEqual([]);
+  });
+
+  it('根提交没有父提交可比，直接报错而不是审一个空改动', async () => {
+    await expect(
+      fetchCommitSnapshot(
+        gateway({ getCommit: async () => ({ sha: 'root', parentSha: null, summary: '初始' }) }),
+        REPO,
+        'root',
+      ),
+    ).rejects.toThrow(/根提交/);
+  });
+
+  it('文件数顶到平台上限时告警，不静默截断', async () => {
+    const many = Array.from({ length: 100 }, (_, i) =>
+      file({ filename: `src/f${String(i)}.ts`, patch: '@@ -1 +1 @@\n-a\n+b' }),
+    );
+
+    const result = await fetchCommitSnapshot(
+      gateway({ compareCommits: async () => many }),
+      REPO,
+      'head',
+    );
+
+    expect(result.warnings.some((w) => w.message.includes('100'))).toBe(true);
+  });
+
+  it('取不到文件内容不影响其他文件', async () => {
+    const result = await fetchCommitSnapshot(
+      gateway({
+        compareCommits: async () => [
+          file({ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }),
+          file({ filename: 'src/b.ts', patch: '@@ -1 +1 @@\n-c\n+d' }),
+        ],
+        getFileContent: async (_ref, path) => (path === 'src/a.ts' ? null : '内容'),
+      }),
+      REPO,
+      'head',
+    );
+
+    expect(result.snapshot.fileContents.get('src/a.ts')).toBeNull();
+    expect(result.snapshot.fileContents.get('src/b.ts')).toBe('内容');
   });
 });

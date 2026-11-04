@@ -18,7 +18,13 @@ import { parseMarker } from '../../core/reconcile/markers.js';
 import { matchesAny } from '../../core/path-glob.js';
 import { parsePatch } from '../../core/diff/parse.js';
 
-import type { GitHubGateway, PullRequestRef, RawFileChange, RawReviewComment } from './client.js';
+import type {
+  GitHubGateway,
+  PullRequestRef,
+  RawFileChange,
+  RawReviewComment,
+  RepoRef,
+} from './client.js';
 
 /** 取数的完整结果：快照 + 过程中产生的告警。 */
 export interface SnapshotResult {
@@ -128,6 +134,61 @@ export async function fetchSnapshot(
       fileContents,
       existingComments,
       // SPEC-GAP：仓库约定文件与构建上下文在 T-06（上下文装配）补齐
+      conventions: null,
+      buildContext: null,
+    },
+    warnings,
+  };
+}
+
+/**
+ * 取「一笔提交」的改动，供 `acr dry-run --commit <sha>` 使用。
+ *
+ * 与 PR 取数的三点不同：
+ * 1. **基准不是分支，是父提交。** 提交没有「目标分支」这个概念，能对比的只有它的父亲。
+ * 2. **没有已有评论。** 提交没有评论区，所以历史比对、已修复标记这些全部不适用——
+ *    这条路径只能跑 dry-run，`review` 模式会在 CLI 层被拒绝。
+ * 3. **文件数受 compare 端点限制。** 它一次最多给 100 个文件且不能翻页，超出的必须告警，
+ *    不能静默截断——用户会以为「其余文件没问题」。
+ */
+export async function fetchCommitSnapshot(
+  gateway: GitHubGateway,
+  repoRef: RepoRef,
+  sha: string,
+  skipPaths: readonly string[] = [],
+): Promise<SnapshotResult> {
+  const warnings: ReviewWarning[] = [];
+  const commit = await gateway.getCommit(repoRef, sha);
+
+  if (commit.parentSha === null) {
+    throw new Error(`提交 ${sha.slice(0, 7)} 是根提交，没有可对比的父提交`);
+  }
+
+  const rawFiles = await gateway.compareCommits(repoRef, commit.parentSha, commit.sha);
+
+  // 顶到上限说明很可能被截断了。宁可让用户知道「没审全」，也不能让他以为审全了
+  if (rawFiles.length >= 100) {
+    warnings.push({
+      kind: 'other',
+      message: '改动文件达到平台单次上限 100 个，超出的文件未纳入本次审查',
+      target: null,
+    });
+  }
+
+  const files = rawFiles.map((raw) => toDiffFile(raw, skipPaths));
+
+  const fileContents = new Map<string, string | null>();
+  for (const file of files) {
+    if (file.skippedReason !== null) continue;
+    fileContents.set(file.path, await gateway.getFileContent(repoRef, file.path, commit.sha));
+  }
+
+  return {
+    snapshot: {
+      diff: { files, baseSha: commit.parentSha, headSha: commit.sha },
+      fileContents,
+      // 提交没有评论区，这里恒为空数组——不是「没读到」，是「不存在」
+      existingComments: [],
       conventions: null,
       buildContext: null,
     },

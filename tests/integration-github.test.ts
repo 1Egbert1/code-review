@@ -45,11 +45,7 @@ describe.skipIf(!enabled)('GitHub 真实取数', () => {
 
   it('能读到某个公开文件的内容', async () => {
     const info = await gateway.getRepoInfo(ref);
-    const content = await gateway.getFileContent(
-      { ...ref, number: 0 },
-      'README.md',
-      info.defaultBranch,
-    );
+    const content = await gateway.getFileContent(ref, 'README.md', info.defaultBranch);
     // 仓库没有 README 时也是合法结果，只要不抛错即可
     expect(content === null || typeof content === 'string').toBe(true);
   });
