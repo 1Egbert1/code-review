@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "label": "prompt-v1.1",
+  "createdAt": "2026-11-04T06:24:15.549Z",
+  "codeVersion": "local",
+  "promptVersions": {
+    "correctness": "v1.1",
+    "security": "v1.1",
+    "convention": "v1.1"
+  },
+  "model": "deepseek-flash",
+  "configHash": "6ed3590cb411b8c0",
+  "datasetHash": "ee91e981698de0bf",
+  "metrics": {
+    "recall": 0.8888888888888888,
+    "precision": 0.5161290322580645,
+    "avgLatencyMs": 27523,
+    "reproducibility": 0.7901785714285714,
+    "samples": 4
+  },
+  "cost": {
+    "uncachedInput": 0.000579,
+    "cacheWriteShort": 0,
+    "cacheWriteLong": 0,
+    "cacheRead": 0.000108288,
+    "output": 0.0216036,
+    "total": 0.0055727220000000004
+  },
+  "detail": {
+    "samples": [
+      {
+        "id": "message-cache-boundary",
+        "expected": 5,
+        "strictHit": 4,
+        "looseHit": 0,
+        "missed": 1,
+        "falsePositives": 4,
+        "sameLineExtras": 2,
+        "exactLine": 4,
+        "missedItems": [
+          {
+            "line": 42,
+            "category": "logic",
+            "note": "缓存键只有 kind:version，丢了 id，不同 id 会互相串用 payload"
+          }
+        ],
+        "extraItems": [
+          {
+            "line": 35,
+            "category": "logic",
+            "title": "correctness/logic"
+          },
+          {
+            "line": 28,
+            "category": "consistency",
+            "title": "convention/consistency"
+          },
+          {
+            "line": 42,
+            "category": "duplication",
+            "title": "convention/duplication"
+          },
+          {
+            "line": 55,
+            "category": "consistency",
+            "title": "convention/consistency"
+          }
+        ],
+        "origins": {
+          "model-line": 8
+        },
+        "latencyMs": 31232,
+        "stability": 0.5
+      },
+      {
+        "id": "api-client-secrets",
+        "expected": 7,
+        "strictHit": 7,
+        "looseHit": 0,
+        "missed": 0,
+        "falsePositives": 5,
+        "sameLineExtras": 5,
+        "exactLine": 7,
+        "missedItems": [],
+        "extraItems": [
+          {
+            "line": 54,
+            "category": "logic",
+            "title": "correctness/logic"
+          },
+          {
+            "line": 18,
+            "category": "boundary",
+            "title": "correctness/boundary"
+          },
+          {
+            "line": 19,
+            "category": "duplication",
+            "title": "convention/duplication"
+          },
+          {
+            "line": 6,
+            "category": "consistency",
+            "title": "convention/consistency"
+          },
+          {
+            "line": 52,
+            "category": "structure",
+            "title": "convention/structure"
+          }
+        ],
+        "origins": {
+          "model-line": 12
+        },
+        "latencyMs": 34758,
+        "stability": 0.7857142857142857
+      },
+      {
+        "id": "preference-naming",
+        "expected": 3,
+        "strictHit": 3,
+        "looseHit": 0,
+        "missed": 0,
+        "falsePositives": 5,
+        "sameLineExtras": 2,
+        "exactLine": 3,
+        "missedItems": [],
+        "extraItems": [
+          {
+            "line": 7,
+            "category": "null-safety",
+            "title": "correctness/null-safety"
+          },
+          {
+            "line": 12,
+            "category": "error-handling",
+            "title": "correctness/error-handling"
+          },
+          {
+            "line": 13,
+            "category": "null-safety",
+            "title": "correctness/null-safety"
+          },
+          {
+            "line": 4,
+            "category": "null-safety",
+            "title": "correctness/null-safety"
+          },
+          {
+            "line": 14,
+            "category": "concurrency",
+            "title": "correctness/concurrency"
+          }
+        ],
+        "origins": {
+          "model-line": 8
+        },
+        "latencyMs": 21942,
+        "stability": 0.875
+      },
+      {
+        "id": "scenario-race",
+        "expected": 3,
+        "strictHit": 2,
+        "looseHit": 1,
+        "missed": 0,
+        "falsePositives": 1,
+        "sameLineExtras": 1,
+        "exactLine": 1,
+        "missedItems": [],
+        "extraItems": [
+          {
+            "line": 9,
+            "category": "consistency",
+            "title": "convention/consistency"
+          }
+        ],
+        "origins": {
+          "model-line": 4
+        },
+        "latencyMs": 22159,
+        "stability": 1
+      }
+    ],
+    "reproducibilityMeasured": true,
+    "repeats": 2,
+    "extraUsage": {
+      "uncachedInput": 1930,
+      "cacheWriteShort": 0,
+      "cacheWriteLong": 0,
+      "cacheRead": 18048,
+      "output": 18437
+    }
+  }
+}

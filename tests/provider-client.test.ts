@@ -198,3 +198,33 @@ describe('模型客户端', () => {
     expect(fake.bodies[0]?.['response_format']).toBeUndefined();
   });
 });
+
+describe('请求超时', () => {
+  it('连接被挂住时在超时后失败，并说清「多久没响应」', async () => {
+    // 没有超时的 fetch 在中间设备挂住连接时会永远不返回：命令行看起来在跑，
+    // CI 一直占着 runner，日志一片空白。这里用「只认 abort 信号」的假 fetch 复现那个状态。
+    const original = globalThis.fetch;
+    globalThis.fetch = ((_url: unknown, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('The operation was aborted');
+          error.name = 'TimeoutError';
+          reject(error);
+        });
+      })) as typeof fetch;
+
+    try {
+      const client = createOpenAiCompatClient({
+        baseUrl: 'https://x/v1',
+        apiKey: 'k',
+        timeoutMs: 20,
+        maxAttempts: 1,
+        sleep: async () => {},
+      });
+
+      await expect(client.complete(REQUEST)).rejects.toThrow(/超时/);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

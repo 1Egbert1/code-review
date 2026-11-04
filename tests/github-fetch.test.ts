@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_CONFIG } from '../src/config/defaults.js';
 import type { CommentMarker } from '../src/contracts/index.js';
 import { renderMarker } from '../src/core/reconcile/markers.js';
 import type {
@@ -119,6 +120,26 @@ describe('取数：组装快照', () => {
     expect(result.snapshot.diff.files[0]?.skippedReason).toBe('命中跳过清单');
     // 仍然在 files 里，所以「这个文件在本次改动中」这个事实不会丢
     expect(result.snapshot.diff.files).toHaveLength(1);
+  });
+
+  it('默认清单跳过根目录 README 与子目录文档，但不误伤代码文件', async () => {
+    const result = await fetchSnapshot(
+      gateway({
+        listPullRequestFiles: async () => [
+          file({ filename: 'README.md' }),
+          file({ filename: 'docs/guide.md' }),
+          file({ filename: 'src/readme.ts' }),
+        ],
+      }),
+      REF,
+      'sha',
+      DEFAULT_CONFIG.review.skipPaths,
+    );
+
+    const byPath = new Map(result.snapshot.diff.files.map((f) => [f.path, f.skippedReason]));
+    expect(byPath.get('README.md')).toBe('命中跳过清单');
+    expect(byPath.get('docs/guide.md')).toBe('命中跳过清单');
+    expect(byPath.get('src/readme.ts')).toBeNull();
   });
 });
 

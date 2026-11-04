@@ -250,3 +250,65 @@ describe('上一期定位', () => {
     expect(findPreviousPage(['2026-11-03'], '2026-11-03')).toBeNull();
   });
 });
+
+describe('载体告警：不能只报第一条', () => {
+  const config = {
+    enabled: true,
+    weights: { complexity: 20, duplication: 20, dependency: 20, 'type-safety': 20, test: 20 },
+    maxScorePerDimension: 20,
+    sampleSize: 60,
+    carrier: 'auto' as const,
+    wikiPagePrefix: '',
+    historyDepth: 12,
+  };
+
+  const failing = (reason: string) => ({
+    kind: 'issue' as const,
+    write: () => Promise.resolve({ ok: false as const, reason }),
+  });
+
+  it('两个载体都失败时，两条原因都要出现在告警里', async () => {
+    const result = await writeReport({
+      config,
+      hasWiki: true,
+      pageName: '2026-11-04',
+      markdown: '# 报告',
+      writers: {
+        wiki: {
+          kind: 'wiki',
+          write: () => Promise.resolve({ ok: false as const, reason: 'CONNECT tunnel failed' }),
+        },
+        issue: failing('Resource not accessible'),
+      },
+    });
+
+    expect(result.location).toBeNull();
+    // 旧实现只保留第一条：用户看到「Wiki 失败」会以为 Issue 成功了
+    expect(result.warning).toContain('CONNECT tunnel failed');
+    expect(result.warning).toContain('Resource not accessible');
+  });
+
+  it('主目标成功但附带动作失败时，返回成功并带告警', async () => {
+    const result = await writeReport({
+      config,
+      hasWiki: false,
+      pageName: '2026-11-04',
+      markdown: '# 报告',
+      writers: {
+        issue: {
+          kind: 'issue',
+          write: () =>
+            Promise.resolve({
+              ok: true as const,
+              reference: '#7',
+              url: 'https://example.com/7',
+              warning: '报告已写入 #7，但关闭失败',
+            }),
+        },
+      },
+    });
+
+    expect(result.location?.reference).toBe('#7');
+    expect(result.warning).toContain('关闭失败');
+  });
+});

@@ -8701,7 +8701,8 @@ var DEFAULT_SKIP_PATHS = [
   "**/*.lock",
   "**/dist/**",
   "**/*.min.js",
-  "**/vendor/**"
+  "**/vendor/**",
+  "**/*.md"
 ];
 var DEFAULT_CONFIG = {
   configVersion: 1,
@@ -10296,14 +10297,35 @@ function looksLikePlaceholder(raw) {
   if (compact.length === 0) return true;
   const distinct = new Set(compact).size;
   if (distinct < compact.length * 0.3) return true;
+  if (isSingleRun(compact)) return true;
   return /(?:your|placeholder|changeme|dummy|sample|replace[-_]?me)/i.test(compact);
 }
+var ASCENDING = "abcdefghijklmnopqrstuvwxyz0123456789";
+function isSingleRun(text2) {
+  const lower = text2.toLowerCase();
+  if (lower.length < 6) return false;
+  for (const alphabet of [ASCENDING, [...ASCENDING].reverse().join("")]) {
+    let all = true;
+    for (let i = 1; i < lower.length; i += 1) {
+      const prev = alphabet.indexOf(lower[i - 1] ?? "");
+      const next = alphabet.indexOf(lower[i] ?? "");
+      if (prev < 0 || next !== prev + 1) {
+        all = false;
+        break;
+      }
+    }
+    if (all) return true;
+  }
+  return false;
+}
+var ALLOW_MARKER = /acr-allow-secret/i;
 function scanSecrets(diff) {
   const hits = [];
   for (const file of diff.files) {
     if (file.skippedReason !== null) continue;
     for (const line of file.lines) {
       if (line.anchor.kind !== "added" || line.anchor.newLine === null) continue;
+      if (ALLOW_MARKER.test(line.text)) continue;
       for (const { kind, label, pattern } of PATTERNS) {
         const match = pattern.exec(line.text);
         if (match === null) continue;
@@ -13425,7 +13447,7 @@ function severityRank(severity) {
 function verifyFindings(items, options) {
   const findings = [];
   const rejections = [];
-  const seen = /* @__PURE__ */ new Set();
+  const seen = /* @__PURE__ */ new Map();
   for (const { raw, reviewer } of items) {
     const reject = (reason, detail) => {
       rejections.push({
@@ -13458,11 +13480,35 @@ function verifyFindings(items, options) {
       title: raw.title,
       evidence: raw.evidence
     });
-    if (seen.has(fingerprint)) {
-      reject("duplicate", `\u4E0E\u672C\u8F6E\u5DF2\u6709\u6761\u76EE\u6307\u7EB9\u76F8\u540C\uFF08${fingerprint}\uFF09`);
+    const existing = seen.get(fingerprint);
+    if (existing !== void 0) {
+      const kept = findings[existing];
+      if (kept !== void 0 && severityRank(raw.severity) < severityRank(kept.severity)) {
+        findings[existing] = {
+          fingerprint,
+          reviewer,
+          anchor: located.anchor,
+          positionOrigin: located.origin,
+          severity: raw.severity,
+          category: raw.category,
+          title: raw.title,
+          body: raw.body,
+          evidence: raw.evidence,
+          suggestion: raw.suggestion,
+          confidence: raw.confidence,
+          preexisting: located.anchor.kind === "context",
+          scope: located.anchor.kind === "context" ? "function" : "changed"
+        };
+        reject(
+          "duplicate",
+          `\u4E0E\u5DF2\u6709\u6761\u76EE\u6307\u7EB9\u76F8\u540C\uFF0C\u4F46\u672C\u6761\u66F4\u4E25\u91CD\uFF08${kept.severity} \u2192 ${raw.severity}\uFF09\uFF0C\u5DF2\u7528\u5B83\u66FF\u6362`
+        );
+      } else {
+        reject("duplicate", `\u4E0E\u672C\u8F6E\u5DF2\u6709\u6761\u76EE\u6307\u7EB9\u76F8\u540C\uFF08${fingerprint}\uFF09`);
+      }
       continue;
     }
-    seen.add(fingerprint);
+    seen.set(fingerprint, findings.length);
     findings.push({
       fingerprint,
       reviewer,
@@ -14021,6 +14067,78 @@ function describeActions(actions) {
     if (action.kind === "replace") return `~ ${action.finding.title}`;
     return `\u2713 \u6807\u8BB0\u5DF2\u4FEE\u590D ${action.commentId}`;
   });
+}
+
+// src/platforms/github/http-status.ts
+function httpStatusOf(error) {
+  if (typeof error !== "object" || error === null) return null;
+  const status = error.status;
+  return typeof status === "number" && status !== 0 ? status : null;
+}
+
+// src/platforms/github/checks.ts
+function stateOf(conclusion) {
+  return conclusion === "failure" ? "failure" : "success";
+}
+function createGitHubCheckPort(gateway, ref, defaultName = "AI \u4EE3\u7801\u5BA1\u67E5") {
+  return {
+    kind: "github",
+    async publish(input) {
+      const name = input.name === "" ? defaultName : input.name;
+      const overflow = input.annotations.length - 50;
+      try {
+        const id = await gateway.createCheckRun(ref, {
+          ...input,
+          name,
+          annotations: input.annotations.slice(0, 50),
+          title: input.title,
+          summary: overflow > 0 ? `${input.summary}
+
+\u53E6\u6709 ${String(overflow)} \u4E2A\u95EE\u9898\u672A\u5728\u6CE8\u89E3\u4E2D\u5217\u51FA\uFF08\u5E73\u53F0\u5355\u6B21\u4E0A\u9650 50 \u6761\uFF09` : input.summary
+        });
+        return { ok: true, commentId: id };
+      } catch (error) {
+        const status = httpStatusOf(error);
+        if (status === 403 || status === 404 || status === 401) {
+          return await publishStatus(gateway, ref, input, name, status);
+        }
+        return {
+          ok: false,
+          failure: {
+            kind: "other",
+            message: error instanceof Error ? error.message : String(error),
+            status
+          }
+        };
+      }
+    }
+  };
+}
+async function publishStatus(gateway, ref, input, name, deniedStatus) {
+  try {
+    const id = await gateway.createCommitStatus(
+      { owner: ref.owner, repo: ref.repo },
+      {
+        sha: input.headSha,
+        state: stateOf(input.conclusion),
+        context: name,
+        description: input.title
+      }
+    );
+    return { ok: true, commentId: `status:${id}` };
+  } catch (error) {
+    const status = httpStatusOf(error);
+    return {
+      ok: false,
+      failure: {
+        kind: status === 403 || status === 401 ? "permission" : "other",
+        message: `\u68C0\u67E5\u8FD0\u884C\u4E0E\u63D0\u4EA4\u72B6\u6001\u90FD\u5199\u4E0D\u4E86\u3002
+\u68C0\u67E5\u8FD0\u884C\u9700\u8981 GitHub App\uFF08\u4E2A\u4EBA\u4EE4\u724C\u4E0D\u652F\u6301\uFF0C\u7B2C\u4E00\u6B21\u8FD4\u56DE ${String(deniedStatus)}\uFF09\uFF1B\u63D0\u4EA4\u72B6\u6001\u9700\u8981\u4EE4\u724C\u5177\u5907 Commit statuses: write\u3002
+\u539F\u9519\u8BEF\uFF1A${error instanceof Error ? error.message : String(error)}`,
+        status
+      }
+    };
+  }
 }
 
 // src/platforms/github/comments.ts
@@ -21494,6 +21612,13 @@ var App2 = App.defaults({ Octokit: Octokit2 });
 var OAuthApp2 = OAuthApp.defaults({ Octokit: Octokit2 });
 
 // src/platforms/github/client.ts
+function isAlreadyExists(error) {
+  if (httpStatusOf(error) !== 422) return false;
+  const data = error.response?.data;
+  const body = data === void 0 ? "" : JSON.stringify(data);
+  const message = error instanceof Error ? error.message : "";
+  return /already_exists/i.test(`${message} ${body}`);
+}
 function createGitHubGateway(token) {
   const octokit = token === "" ? new Octokit2() : new Octokit2({ auth: token });
   return {
@@ -21683,6 +21808,19 @@ function createGitHubGateway(token) {
         state: issue.state === "open" ? "open" : "closed"
       }));
     },
+    async ensureLabel(ref, label) {
+      try {
+        await octokit.rest.issues.createLabel({
+          owner: ref.owner,
+          repo: ref.repo,
+          name: label,
+          color: "ededed",
+          description: "\u4EE3\u7801\u5BA1\u67E5\u5DE5\u5177\u5199\u5165\u7684\u62A5\u544A\u8F7D\u4F53\uFF08\u81EA\u52A8\u521B\u5EFA\uFF09"
+        });
+      } catch (error) {
+        if (!isAlreadyExists(error)) throw error;
+      }
+    },
     async createIssue(ref, input) {
       const response = await octokit.rest.issues.create({
         owner: ref.owner,
@@ -21722,6 +21860,18 @@ function createGitHubGateway(token) {
         issue_number: number,
         state: "closed"
       });
+    },
+    async createCommitStatus(ref, input) {
+      const response = await octokit.rest.repos.createCommitStatus({
+        owner: ref.owner,
+        repo: ref.repo,
+        sha: input.sha,
+        state: input.state,
+        context: input.context,
+        description: input.description.slice(0, 140),
+        ...input.targetUrl === void 0 ? {} : { target_url: input.targetUrl }
+      });
+      return String(response.data.id);
     },
     async createCheckRun(ref, input) {
       const response = await octokit.rest.checks.create({
@@ -21785,25 +21935,56 @@ function createGitHubIssueWriter(gateway, ref, options = {}) {
         const existing = await gateway.listIssuesByLabel(ref, INSPECTION_LABEL);
         const target = pickLatest(existing);
         if (target === void 0) {
+          await gateway.ensureLabel(ref, INSPECTION_LABEL);
           const created = await gateway.createIssue(ref, {
             title,
             body: markdown,
             labels: [INSPECTION_LABEL]
           });
-          await gateway.closeIssue(ref, created.number);
-          return { ok: true, reference: `#${String(created.number)}`, url: created.url };
+          const closed2 = await closeQuietly(gateway, ref, created.number);
+          return {
+            ok: true,
+            reference: `#${String(created.number)}`,
+            url: created.url,
+            ...closed2 === null ? {} : { warning: closed2 }
+          };
         }
         const updated = await gateway.updateIssue(ref, target.number, { title, body: markdown });
-        if (updated.state === "open") await gateway.closeIssue(ref, target.number);
-        return { ok: true, reference: `#${String(updated.number)}`, url: updated.url };
+        const closed = updated.state === "open" ? await closeQuietly(gateway, ref, target.number) : null;
+        return {
+          ok: true,
+          reference: `#${String(updated.number)}`,
+          url: updated.url,
+          ...closed === null ? {} : { warning: closed }
+        };
       } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+        return {
+          ok: false,
+          // 统一脱敏：任何一条 git 命令都可能把带凭证的参数回显出来
+          reason: redactCredentials(error instanceof Error ? error.message : String(error))
+        };
       }
     }
   };
 }
+async function closeQuietly(gateway, ref, number) {
+  try {
+    await gateway.closeIssue(ref, number);
+    return null;
+  } catch (error) {
+    return `\u62A5\u544A\u5DF2\u5199\u5165 #${String(number)}\uFF0C\u4F46\u5173\u95ED\u5931\u8D25\uFF08\u7F3A\u5C11 issues: write \u6743\u9650\uFF1F\uFF09\uFF1A${redactCredentials(
+      error instanceof Error ? error.message : String(error)
+    )}`;
+  }
+}
 function pickLatest(issues) {
   return [...issues].sort((a, b) => b.number - a.number)[0];
+}
+function redactCredentials(text2) {
+  return text2.replace(/(https?:\/\/[^\s:/@]+:)[^\s@/]+(@)/g, "$1***$2").replace(
+    /\b(?:github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9_-]{10,})\b/g,
+    "***"
+  );
 }
 function createGitWikiWriter(options) {
   const authorName = options.authorName ?? "acr-bot";
@@ -21844,7 +22025,11 @@ function createGitWikiWriter(options) {
           url: `${cloneUrl.replace(/\.wiki\.git$/, "")}/wiki/${pageName}`
         };
       } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+        return {
+          ok: false,
+          // 统一脱敏：任何一条 git 命令都可能把带凭证的参数回显出来
+          reason: redactCredentials(error instanceof Error ? error.message : String(error))
+        };
       }
     }
   };
@@ -22131,13 +22316,24 @@ var RETRYABLE = /* @__PURE__ */ new Set([408, 409, 425, 429, 500, 502, 503, 504]
 var DEFAULT_SLEEP2 = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
-function createFetchTransport(apiKey, extra) {
+function createFetchTransport(apiKey, extra, timeoutMs) {
   return async (url, init) => {
-    const response = await fetch(url, {
-      method: init.method,
-      headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
-      body: init.body
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: init.method,
+        headers: { ...init.headers, ...extra, authorization: `Bearer ${apiKey}` },
+        body: init.body,
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new Error(`\u6A21\u578B\u8BF7\u6C42\u8D85\u65F6\uFF1A${String(Math.round(timeoutMs / 1e3))} \u79D2\u5185\u6CA1\u6709\u54CD\u5E94`, {
+          cause: error
+        });
+      }
+      throw error;
+    }
     const text2 = await response.text();
     let body = text2;
     try {
@@ -22202,7 +22398,7 @@ function createOpenAiCompatClient(options) {
   const sleep = options.sleep ?? DEFAULT_SLEEP2;
   const maxAttempts = options.maxAttempts ?? 3;
   const baseDelay = options.baseDelayMs ?? 500;
-  const transport = options.transport ?? createFetchTransport(options.apiKey, options.headers ?? {});
+  const transport = options.transport ?? createFetchTransport(options.apiKey, options.headers ?? {}, options.timeoutMs ?? 18e4);
   const endpoint2 = `${options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const initial = options.structuredOutput === void 0 || options.structuredOutput === "auto" ? "json-schema" : options.structuredOutput;
   let mode = initial === "none" ? "none" : initial;
@@ -22270,6 +22466,26 @@ function createOpenAiCompatClient(options) {
 }
 
 // src/core/eval/baseline.ts
+import { createHash as createHash3 } from "node:crypto";
+function summarize(samples, extras) {
+  const expected = samples.reduce((sum, sample) => sum + sample.expected, 0);
+  const hit = samples.reduce((sum, sample) => sum + sample.hit, 0);
+  const falsePositives = samples.reduce((sum, sample) => sum + sample.falsePositives, 0);
+  const recall = expected === 0 ? 0 : hit / expected;
+  const reported = hit + falsePositives;
+  const precision = reported === 0 ? 1 : hit / reported;
+  return {
+    recall,
+    precision,
+    avgLatencyMs: extras.avgLatencyMs,
+    reproducibility: extras.reproducibility,
+    samples: samples.length
+  };
+}
+function computeDatasetHash(samples) {
+  const normalized = [...samples].map((sample) => `${sample.id}:${String(sample.expected)}`).sort().join("\0");
+  return createHash3("sha256").update(normalized, "utf8").digest("hex").slice(0, 16);
+}
 function compareBaselines(before, after) {
   if (before.datasetHash !== after.datasetHash) {
     return {
@@ -22286,7 +22502,9 @@ function compareBaselines(before, after) {
       higherIsBetter: true
     },
     {
-      name: "\u7CBE\u786E\u7387",
+      // 不叫「精确率」：分母里混着「真问题但本轮未标注」的条目。
+      // 叫精确率会让人以为模型在乱报，而实际往往只是标注不全。
+      name: "\u6807\u6CE8\u547D\u4E2D\u7387",
       before: before.metrics.precision,
       after: after.metrics.precision,
       delta: after.metrics.precision - before.metrics.precision,
@@ -22329,10 +22547,14 @@ function compareBaselines(before, after) {
 }
 function verdictOf(metrics) {
   const recall = metrics.find((metric) => metric.name === "\u53EC\u56DE\u7387");
+  const precision = metrics.find((metric) => metric.name === "\u6807\u6CE8\u547D\u4E2D\u7387");
   const cost = metrics.find((metric) => metric.name === "\u5E73\u5747\u6210\u672C");
-  const recallDrop = recall !== void 0 && recall.delta < -0.02;
+  if (recall !== void 0 && recall.delta >= 0.05) {
+    const precisionDrop = precision !== void 0 && precision.delta < -0.1;
+    return precisionDrop ? "\u53EC\u56DE\u663E\u8457\u63D0\u5347\uFF0C\u4F46\u6807\u6CE8\u547D\u4E2D\u7387\u540C\u65F6\u4E0B\u964D\u2014\u2014\u62A5\u5F97\u591A\u4E86\uFF0C\u9700\u770B\u660E\u7EC6\u786E\u8BA4\u65B0\u589E\u7684\u662F\u771F\u95EE\u9898" : "\u53EC\u56DE\u663E\u8457\u63D0\u5347\uFF0C\u8FD9\u662F\u672C\u8F6E\u7684\u4E3B\u8981\u6539\u8FDB";
+  }
+  if (recall !== void 0 && recall.delta <= -0.02) return "\u53EC\u56DE\u660E\u663E\u4E0B\u964D\uFF0C\u4E0D\u5EFA\u8BAE\u91C7\u7528";
   const costDrop = cost !== void 0 && cost.before > 0 && cost.delta / cost.before < -0.15;
-  if (recallDrop) return "\u53EC\u56DE\u660E\u663E\u4E0B\u964D\uFF0C\u4E0D\u5EFA\u8BAE\u91C7\u7528";
   if (costDrop) return "\u6210\u672C\u660E\u663E\u4E0B\u964D\u4E14\u53EC\u56DE\u672A\u9000\uFF0C\u51C0\u6536\u76CA\u4E3A\u6B63";
   return "\u53D8\u5316\u4E0D\u663E\u8457\uFF0C\u9700\u7ED3\u5408\u5177\u4F53\u6837\u672C\u5224\u65AD";
 }
@@ -22340,6 +22562,383 @@ function isBaselineSnapshot(value) {
   if (typeof value !== "object" || value === null) return false;
   const record = value;
   return record["version"] === 1 && typeof record["label"] === "string" && typeof record["datasetHash"] === "string" && typeof record["model"] === "string" && typeof record["metrics"] === "object" && record["metrics"] !== null;
+}
+
+// src/core/eval/dataset.ts
+var STATUSES = /* @__PURE__ */ new Set(["added", "modified", "deleted", "renamed"]);
+function parseDataset(text2) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text2);
+  } catch (error) {
+    throw new Error(`\u6837\u672C\u96C6\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${asMessage2(error)}`, { cause: error });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("\u6837\u672C\u96C6\u9876\u5C42\u5FC5\u987B\u662F\u5BF9\u8C61");
+  }
+  const root = parsed;
+  if (root["version"] !== 1) throw new Error(`\u6837\u672C\u96C6\u7248\u672C\u4E0D\u652F\u6301\uFF1A${String(root["version"])}`);
+  if (typeof root["name"] !== "string" || root["name"] === "") throw new Error("\u6837\u672C\u96C6\u7F3A\u5C11 name");
+  const rawSamples = root["samples"];
+  if (!Array.isArray(rawSamples) || rawSamples.length === 0) {
+    throw new Error("\u6837\u672C\u96C6\u91CC\u6CA1\u6709\u4EFB\u4F55\u6837\u672C");
+  }
+  const samples = rawSamples.map((item, index) => parseSample(item, index));
+  const seen = /* @__PURE__ */ new Set();
+  for (const sample of samples) {
+    if (seen.has(sample.id)) throw new Error(`\u6837\u672C id \u91CD\u590D\uFF1A${sample.id}`);
+    seen.add(sample.id);
+  }
+  return {
+    version: 1,
+    name: root["name"],
+    ...typeof root["note"] === "string" ? { note: root["note"] } : {},
+    samples
+  };
+}
+function parseSample(value, index) {
+  const at = `\u7B2C ${String(index + 1)} \u4E2A\u6837\u672C`;
+  if (typeof value !== "object" || value === null) throw new Error(`${at} \u4E0D\u662F\u5BF9\u8C61`);
+  const record = value;
+  const id = record["id"];
+  const path = record["path"];
+  const status = record["status"];
+  const patch = record["patch"];
+  const content = record["content"];
+  if (typeof id !== "string" || id === "") throw new Error(`${at} \u7F3A\u5C11 id`);
+  if (typeof path !== "string" || path === "") throw new Error(`\u6837\u672C ${id} \u7F3A\u5C11 path`);
+  if (typeof status !== "string" || !STATUSES.has(status)) {
+    throw new Error(`\u6837\u672C ${id} \u7684 status \u975E\u6CD5\uFF1A${String(status)}`);
+  }
+  if (typeof patch !== "string") throw new Error(`\u6837\u672C ${id} \u7F3A\u5C11 patch`);
+  if (typeof content !== "string") throw new Error(`\u6837\u672C ${id} \u7F3A\u5C11 content`);
+  const rawExpected = record["expected"];
+  if (!Array.isArray(rawExpected)) throw new Error(`\u6837\u672C ${id} \u7F3A\u5C11 expected \u6570\u7EC4`);
+  const expected = rawExpected.map(
+    (item, order) => parseExpected(item, `${id} \u7684\u7B2C ${String(order + 1)} \u6761\u671F\u671B`)
+  );
+  return {
+    id,
+    path,
+    status,
+    patch,
+    content,
+    expected
+  };
+}
+function parseExpected(value, at) {
+  if (typeof value !== "object" || value === null) throw new Error(`${at} \u4E0D\u662F\u5BF9\u8C61`);
+  const record = value;
+  const line = record["line"];
+  const category = record["category"];
+  const reviewer = record["reviewer"];
+  if (typeof line !== "number" || !Number.isInteger(line) || line <= 0) {
+    throw new Error(`${at} \u7684 line \u5FC5\u987B\u662F\u6B63\u6574\u6570`);
+  }
+  if (typeof category !== "string" || category === "") throw new Error(`${at} \u7F3A\u5C11 category`);
+  if (reviewer !== "correctness" && reviewer !== "security" && reviewer !== "convention") {
+    throw new Error(`${at} \u7684 reviewer \u975E\u6CD5\uFF1A${String(reviewer)}`);
+  }
+  return {
+    line,
+    category,
+    reviewer,
+    ...typeof record["severity"] === "string" ? { severity: record["severity"] } : {},
+    ...typeof record["note"] === "string" ? { note: record["note"] } : {}
+  };
+}
+function datasetHashOf(dataset) {
+  return computeDatasetHash(
+    dataset.samples.map((sample) => ({ id: sample.id, expected: sample.expected.length }))
+  );
+}
+function describeDataset(dataset) {
+  const expected = dataset.samples.reduce((sum, sample) => sum + sample.expected.length, 0);
+  return `${dataset.name}\uFF1A${String(dataset.samples.length)} \u4E2A\u6837\u672C / ${String(expected)} \u6761\u671F\u671B\u7ED3\u8BBA`;
+}
+function asMessage2(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// src/core/eval/runner.ts
+import { createHash as createHash4 } from "node:crypto";
+
+// src/core/eval/match.ts
+function matchFindings(expected, actual, options = {}) {
+  const tolerance = options.lineTolerance ?? 2;
+  const usedActual = /* @__PURE__ */ new Set();
+  const strict = [];
+  const loose = [];
+  const matchedExpected = /* @__PURE__ */ new Set();
+  for (const hit of greedyMatch(expected, actual, usedActual, matchedExpected, tolerance, true)) {
+    const actualItem = actual.find((item) => item.fingerprint === hit.fingerprint);
+    strict.push({
+      expectedIndex: hit.expectedIndex,
+      fingerprint: hit.fingerprint,
+      lineDelta: (actualItem?.line ?? 0) - (expected[hit.expectedIndex]?.line ?? 0),
+      exact: (actualItem?.line ?? 0) === (expected[hit.expectedIndex]?.line ?? 0)
+    });
+    usedActual.add(hit.fingerprint);
+    matchedExpected.add(hit.expectedIndex);
+  }
+  for (const hit of greedyMatch(expected, actual, usedActual, matchedExpected, tolerance, false)) {
+    const actualItem = actual.find((item) => item.fingerprint === hit.fingerprint);
+    loose.push({
+      expectedIndex: hit.expectedIndex,
+      fingerprint: hit.fingerprint,
+      expectedCategory: expected[hit.expectedIndex]?.category ?? "",
+      actualCategory: actualItem?.category ?? "",
+      lineDelta: (actualItem?.line ?? 0) - (expected[hit.expectedIndex]?.line ?? 0)
+    });
+    usedActual.add(hit.fingerprint);
+    matchedExpected.add(hit.expectedIndex);
+  }
+  const missed = expected.map((_, index) => index).filter((index) => !matchedExpected.has(index));
+  const falsePositives = actual.map((item) => item.fingerprint).filter((fingerprint) => !usedActual.has(fingerprint));
+  const hitLines = strict.map((hit) => expected[hit.expectedIndex]?.line ?? 0).concat(loose.map((hit) => expected[hit.expectedIndex]?.line ?? 0));
+  const sameLineExtras = falsePositives.filter((fingerprint) => {
+    const item = actual.find((candidate) => candidate.fingerprint === fingerprint);
+    if (item === void 0) return false;
+    return hitLines.some((line) => Math.abs(item.line - line) <= tolerance);
+  });
+  return { strict, loose, missed, falsePositives, sameLineExtras };
+}
+function greedyMatch(expected, actual, usedActual, matchedExpected, tolerance, requireSameCategory) {
+  const candidates = [];
+  for (let index = 0; index < expected.length; index += 1) {
+    const want = expected[index];
+    if (want === void 0 || matchedExpected.has(index)) continue;
+    for (const item of actual) {
+      if (usedActual.has(item.fingerprint)) continue;
+      if (item.reviewer !== want.reviewer) continue;
+      if (requireSameCategory && item.category !== want.category) continue;
+      const distance = Math.abs(item.line - want.line);
+      if (distance > tolerance) continue;
+      candidates.push({ expectedIndex: index, fingerprint: item.fingerprint, distance });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance || a.fingerprint.localeCompare(b.fingerprint));
+  const taken = new Set(usedActual);
+  const claimedExpected = new Set(matchedExpected);
+  const picked = [];
+  for (const candidate of candidates) {
+    if (taken.has(candidate.fingerprint)) continue;
+    if (claimedExpected.has(candidate.expectedIndex)) continue;
+    taken.add(candidate.fingerprint);
+    claimedExpected.add(candidate.expectedIndex);
+    picked.push(candidate);
+  }
+  return picked;
+}
+
+// src/core/eval/runner.ts
+function forcedDimensions(config) {
+  return {
+    ...config,
+    review: {
+      ...config.review,
+      dimensions: {
+        correctness: { ...config.review.dimensions.correctness, enabled: true },
+        security: { ...config.review.dimensions.security, enabled: true },
+        convention: { ...config.review.dimensions.convention }
+      }
+    },
+    // 评测不写任何东西，也不该被门禁判定干扰
+    gate: { ...config.gate, enabled: false }
+  };
+}
+function snapshotOf(datasetName, sample) {
+  const file = parsePatch(sample.patch, {
+    path: sample.path,
+    oldPath: null,
+    status: sample.status
+  });
+  return {
+    diff: {
+      files: [file],
+      // 评测没有真实的提交号，但下游会用它们做展示，给稳定的占位值而不是空串
+      baseSha: `eval-base-${datasetName}`,
+      headSha: `eval-head-${sample.id}`
+    },
+    fileContents: /* @__PURE__ */ new Map([[sample.path, sample.content]])
+  };
+}
+function toActual(findings) {
+  return findings.map((finding) => ({
+    fingerprint: finding.fingerprint,
+    // 删除行锚在旧侧；评测样本以新版本为准，旧侧行号只作兜底
+    line: finding.anchor.newLine ?? finding.anchor.oldLine ?? 0,
+    category: finding.category,
+    reviewer: finding.reviewer,
+    severity: finding.severity
+  }));
+}
+function jaccard(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const item of a) if (b.has(item)) intersection += 1;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 1 : intersection / union;
+}
+async function runEval(options) {
+  const repeats = Math.max(2, options.repeats ?? 2);
+  const config = forcedDimensions(options.config);
+  const now = options.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+  const sampleResults = [];
+  const details = [];
+  let totalUsage = {
+    uncachedInput: 0,
+    cacheWriteShort: 0,
+    cacheWriteLong: 0,
+    cacheRead: 0,
+    output: 0
+  };
+  let extraUsage = totalUsage;
+  let totalLatency = 0;
+  for (const sample of options.dataset.samples) {
+    const { diff, fileContents } = snapshotOf(options.dataset.name, sample);
+    const request2 = {
+      repository: `eval/${options.dataset.name}`,
+      mode: "local",
+      pullRequestNumber: null,
+      baseRef: null,
+      headRef: null,
+      dryRun: true
+    };
+    const findingsOfRun = [];
+    let firstLatency = 0;
+    for (let round = 0; round < repeats; round += 1) {
+      const roundStarted = Date.now();
+      const result = await runReview(request2, {
+        config,
+        client: options.client,
+        // 快照是固定的：评测不测取数，取数有自己的集成测试
+        fetchSnapshot: () => Promise.resolve({
+          diff,
+          fileContents,
+          existingComments: [],
+          conventions: null,
+          buildContext: null
+        }),
+        // 只打印模式不创建写入端口——评测绝不产生任何写操作
+        port: null
+      });
+      const latency = Date.now() - roundStarted;
+      if (round === 0) {
+        firstLatency = latency;
+        totalUsage = sumUsage(totalUsage, result.usage.tokens);
+      } else {
+        extraUsage = sumUsage(extraUsage, result.usage.tokens);
+      }
+      findingsOfRun.push({
+        fingerprints: new Set(result.findings.map((finding) => finding.fingerprint)),
+        actual: toActual(result.findings),
+        origins: countOrigins(result.findings)
+      });
+    }
+    const first = findingsOfRun[0];
+    const actual = first?.actual ?? [];
+    const matched = matchFindings(sample.expected, actual);
+    const stability = findingsOfRun.length < 2 ? 1 : average(
+      findingsOfRun.slice(1).map((run) => jaccard(first?.fingerprints ?? /* @__PURE__ */ new Set(), run.fingerprints))
+    );
+    sampleResults.push({
+      id: sample.id,
+      expected: sample.expected.length,
+      hit: matched.strict.length,
+      falsePositives: matched.falsePositives.length
+    });
+    details.push({
+      id: sample.id,
+      expected: sample.expected.length,
+      strictHit: matched.strict.length,
+      looseHit: matched.loose.length,
+      missed: matched.missed.length,
+      falsePositives: matched.falsePositives.length,
+      sameLineExtras: matched.sameLineExtras.length,
+      exactLine: matched.strict.filter((hit) => hit.exact).length,
+      missedItems: matched.missed.map((index) => {
+        const want = sample.expected[index];
+        return {
+          line: want?.line ?? 0,
+          category: want?.category ?? "",
+          note: want?.note ?? null
+        };
+      }),
+      extraItems: matched.falsePositives.map((fingerprint) => {
+        const item = actual.find((candidate) => candidate.fingerprint === fingerprint);
+        return {
+          line: item?.line ?? 0,
+          category: item?.category ?? "",
+          title: `${item?.reviewer ?? "?"}/${item?.category ?? "?"}`
+        };
+      }),
+      origins: first?.origins ?? {},
+      latencyMs: firstLatency,
+      stability
+    });
+    totalLatency += firstLatency;
+    options.onProgress?.(
+      `${sample.id}\uFF1A\u547D\u4E2D ${String(matched.strict.length)}/${String(sample.expected.length)}\uFF0C\u7C7B\u522B\u9519 ${String(matched.loose.length)}\uFF0C\u591A\u4F59 ${String(matched.falsePositives.length)}`
+    );
+  }
+  const metrics = summarize(sampleResults, {
+    avgLatencyMs: Math.round(totalLatency / Math.max(1, options.dataset.samples.length)),
+    reproducibility: average(details.map((detail2) => detail2.stability))
+  });
+  const cost = computeCost(totalUsage, config.llm.pricing);
+  const snapshot = {
+    version: 1,
+    label: options.label,
+    createdAt: now(),
+    codeVersion: options.codeVersion,
+    promptVersions: promptVersionsOf(),
+    model: config.llm.model,
+    configHash: configHashOf(config),
+    datasetHash: datasetHashOf(options.dataset),
+    metrics,
+    // 成本按「单个样本的平均值」记，样本数变了也不影响这个数
+    cost: cost === null ? null : {
+      ...cost,
+      total: cost.total / Math.max(1, options.dataset.samples.length)
+    }
+  };
+  const detail = {
+    samples: details,
+    reproducibilityMeasured: repeats >= 2,
+    repeats,
+    extraUsage
+  };
+  return { snapshot, detail };
+}
+function countOrigins(findings) {
+  const counts = {};
+  for (const finding of findings) {
+    counts[finding.positionOrigin] = (counts[finding.positionOrigin] ?? 0) + 1;
+  }
+  return counts;
+}
+function average(values) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+function promptVersionsOf() {
+  return {
+    correctness: correctnessReviewer.promptVersion,
+    security: securityReviewer.promptVersion,
+    convention: conventionReviewer.promptVersion
+  };
+}
+function configHashOf(config) {
+  const payload = JSON.stringify({
+    model: config.llm.model,
+    temperature: config.llm.temperature,
+    maxOutputTokens: config.llm.maxOutputTokens,
+    dimensions: config.review.dimensions,
+    skipPaths: config.review.skipPaths,
+    crossFileDepth: config.review.crossFileDepth
+  });
+  return createHash4("sha256").update(payload, "utf8").digest("hex").slice(0, 16);
 }
 
 // src/core/inspection/carrier.ts
@@ -22356,12 +22955,17 @@ async function writeReport(input) {
     if (writer === void 0) continue;
     const outcome = await writer.write(input.pageName, input.markdown);
     if (outcome.ok) {
+      const notices = [
+        ...warning === null ? [] : [`${warning}\uFF0C\u5DF2\u6539\u4E3A\u5199\u5165${carrier === "wiki" ? " Wiki" : " Issue"}`],
+        ...outcome.warning === void 0 ? [] : [outcome.warning]
+      ];
       return {
         location: { carrier: writer.kind, reference: outcome.reference, url: outcome.url },
-        warning: warning === null ? null : `${warning}\uFF0C\u5DF2\u6539\u4E3A\u5199\u5165${carrier === "wiki" ? " Wiki" : " Issue"}`
+        warning: notices.length === 0 ? null : notices.join("\uFF1B")
       };
     }
-    warning = warning === null ? `\u5199\u5165${carrier === "wiki" ? " Wiki " : " Issue "}\u5931\u8D25\uFF1A${outcome.reason}` : warning;
+    const reason = `\u5199\u5165${carrier === "wiki" ? " Wiki " : " Issue "}\u5931\u8D25\uFF1A${outcome.reason}`;
+    warning = warning === null ? reason : `${warning}\uFF1B${reason}`;
   }
   return { location: null, warning: warning ?? "\u6CA1\u6709\u53EF\u7528\u7684\u62A5\u544A\u8F7D\u4F53" };
 }
@@ -23183,6 +23787,55 @@ async function readOptional(root, name) {
   }
 }
 
+// src/cli/event.ts
+var NUMBER_PATHS = [
+  ["pull_request", "number"],
+  ["issue", "number"],
+  ["inputs", "pr"]
+];
+function numberFromEventPayload(payload) {
+  for (const path of NUMBER_PATHS) {
+    let node = payload;
+    for (const key of path) {
+      if (typeof node !== "object" || node === null) {
+        node = void 0;
+        break;
+      }
+      node = node[key];
+    }
+    const value = typeof node === "string" ? Number(node) : node;
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  }
+  return null;
+}
+async function resolvePullRequestNumber(input) {
+  const fromFlag = toNumber(input.flag);
+  if (fromFlag !== null) return fromFlag;
+  const fromEnv = toNumber(input.env["ACR_PULL_REQUEST"]);
+  if (fromEnv !== null) return fromEnv;
+  const eventPath = input.env["GITHUB_EVENT_PATH"];
+  if (eventPath === void 0 || eventPath.trim() === "") return Number.NaN;
+  try {
+    const read = input.readEventFile ?? defaultReadEventFile;
+    const parsed = JSON.parse(await read(eventPath));
+    const fromEvent = numberFromEventPayload(parsed);
+    return fromEvent ?? Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
+}
+function toNumber(text2) {
+  if (text2 === void 0) return null;
+  const trimmed = text2.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+async function defaultReadEventFile(path) {
+  const { readFile: readFile4 } = await import("node:fs/promises");
+  return readFile4(path, "utf8");
+}
+
 // src/cli/stats.ts
 var ORIGIN_LABEL = {
   "model-line": "\u6A21\u578B\u884C\u53F7",
@@ -23295,14 +23948,12 @@ function formatStats(input) {
 function formatComparison(comparison) {
   if (!comparison.comparable) return `\u65E0\u6CD5\u5BF9\u6BD4\uFF1A${comparison.reason}`;
   const lines = [];
-  lines.push("\u6307\u6807          \u57FA\u51C6        \u672C\u6B21        \u53D8\u5316");
+  lines.push("\u6307\u6807 | \u57FA\u51C6 | \u672C\u6B21 | \u53D8\u5316");
   for (const metric of comparison.metrics) {
     const format = (value) => metric.name.includes("\u5EF6\u8FDF") ? `${(value / 1e3).toFixed(1)}s` : metric.name.includes("\u6210\u672C") ? formatUsd(value) : value.toFixed(3);
     const arrow = metric.delta === 0 ? "\u2014" : metric.delta > 0 ? "\u2191" : "\u2193";
     lines.push(
-      `${metric.name.padEnd(10, " ")}  ${format(metric.before).padStart(8, " ")}  ${format(metric.after).padStart(8, " ")}  ${arrow} ${format(
-        Math.abs(metric.delta)
-      )}`
+      `${metric.name} | ${format(metric.before)} | ${format(metric.after)} | ${arrow} ${format(Math.abs(metric.delta))}`
     );
   }
   if (comparison.changedPrompts.length > 0) {
@@ -23358,6 +24009,94 @@ function parseFlags(args) {
 }
 function isCommand(value) {
   return COMMANDS.includes(value);
+}
+async function runEvalCommand(datasetPath, flags, deps) {
+  const loaded = await loadConfig(deps.cwd);
+  if (!loaded.ok) {
+    for (const error of loaded.errors) deps.stderr(`${error.path}\uFF1A${error.message}
+`);
+    return 1;
+  }
+  const apiKey = deps.env[loaded.config.llm.apiKeyEnv];
+  if (apiKey === void 0 || apiKey === "") {
+    deps.stderr(`\u7F3A\u5C11\u6A21\u578B\u5BC6\u94A5\uFF1A\u8BF7\u8BBE\u7F6E\u73AF\u5883\u53D8\u91CF ${loaded.config.llm.apiKeyEnv}
+`);
+    return 3;
+  }
+  const repeatText = flags["repeat"];
+  const repeats = repeatText === void 0 || repeatText === "" ? 2 : Number(repeatText);
+  if (!Number.isInteger(repeats) || repeats < 2) {
+    deps.stderr("--repeat \u5FC5\u987B\u662F >= 2 \u7684\u6574\u6570\uFF08\u590D\u73B0\u7387\u81F3\u5C11\u8981\u8DD1\u4E24\u8F6E\uFF09\n");
+    return 2;
+  }
+  let dataset;
+  try {
+    dataset = parseDataset(await readFile3(datasetPath, "utf8"));
+  } catch (error) {
+    deps.stderr(`\u6837\u672C\u96C6\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}
+`);
+    return 1;
+  }
+  const client = createOpenAiCompatClient({
+    baseUrl: loaded.config.llm.baseUrl,
+    apiKey,
+    headers: loaded.config.llm.headers,
+    structuredOutput: loaded.config.llm.structuredOutput
+  });
+  deps.stdout(`${describeDataset(dataset)}
+`);
+  deps.stdout(`\u6A21\u578B ${loaded.config.llm.model}\uFF0C\u6BCF\u6837\u672C ${String(repeats)} \u8F6E
+
+`);
+  const result = await runEval({
+    dataset,
+    config: loaded.config,
+    client,
+    label: flags["label"] ?? "unlabeled",
+    codeVersion: deps.env["GITHUB_SHA"] ?? "local",
+    repeats,
+    onProgress: (message) => deps.stdout(`  ${message}
+`)
+  });
+  const outPath = flags["out"];
+  if (outPath !== void 0 && outPath !== "") {
+    await writeFile(
+      outPath,
+      `${JSON.stringify({ ...result.snapshot, detail: result.detail }, null, 2)}
+`,
+      "utf8"
+    );
+    deps.stdout(`
+\u5FEB\u7167\u5DF2\u5199\u5165 ${outPath}
+`);
+  }
+  const metrics = result.snapshot.metrics;
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  const lines = [
+    // 不叫「精确率」：分母里混着「真问题但没标注」的条目，
+    // 而这个样本集的标注是选择性的。叫精确率会让人以为模型在乱报。
+    `\u53EC\u56DE\u7387 ${percent(metrics.recall)} \xB7 \u6807\u6CE8\u547D\u4E2D\u7387 ${percent(metrics.precision)}`,
+    `\u590D\u73B0\u7387 ${percent(metrics.reproducibility)} \xB7 \u5E73\u5747\u5EF6\u8FDF ${(metrics.avgLatencyMs / 1e3).toFixed(1)}s`,
+    ...result.snapshot.cost === null ? ["\u5E73\u5747\u6210\u672C \u65E0\u6CD5\u6298\u7B97\uFF08\u672A\u914D\u5355\u4EF7\uFF09"] : [`\u5E73\u5747\u6210\u672C ${formatUsd(result.snapshot.cost.total)}`]
+  ];
+  const loose = result.detail.samples.reduce((sum, sample) => sum + sample.looseHit, 0);
+  const expectedTotal = result.detail.samples.reduce((sum, sample) => sum + sample.expected, 0);
+  if (loose > 0) {
+    lines.push(
+      `\u7C7B\u522B\u62A5\u9519 ${String(loose)} \u6761\uFF08\u5360\u671F\u671B ${percent(loose / Math.max(1, expectedTotal))}\uFF09\u2014\u2014\u4F4D\u7F6E\u5BF9\u4F46\u5F52\u7C7B\u9519\uFF0C\u9700\u4EBA\u5DE5\u770B`
+    );
+  }
+  const dup = result.detail.samples.reduce((sum, sample) => sum + sample.sameLineExtras, 0);
+  if (dup > 0) {
+    lines.push(`\u540C\u4F4D\u7F6E\u91CD\u590D ${String(dup)} \u6761\u2014\u2014\u5DF2\u88AB\u8BA1\u4E3A\u591A\u4F59\uFF0C\u4F46\u5C5E\u4E8E\u91CD\u590D\u62A5\u544A\u800C\u975E\u8BF4\u9519`);
+  }
+  lines.push(
+    "\u6CE8\uFF1A\u6807\u6CE8\u547D\u4E2D\u7387\u7684\u5206\u6BCD\u542B\u300C\u771F\u95EE\u9898\u4F46\u672C\u8F6E\u672A\u6807\u6CE8\u300D\u7684\u6761\u76EE\uFF0C\u504F\u4F4E\u591A\u534A\u662F\u6807\u6CE8\u4E0D\u5168\uFF0C\u9700\u770B\u660E\u7EC6\u518D\u5224\u65AD"
+  );
+  deps.stdout(`
+${lines.join("\n")}
+`);
+  return 0;
 }
 var execFileAsync = promisify(execFile);
 async function runCommand(command, args, cwd) {
@@ -23425,8 +24164,10 @@ async function runReviewCommand(flags, deps, dryRun) {
     deps.stderr("\u6309\u63D0\u4EA4\u5BA1\u67E5\u4E0D\u652F\u6301\u53D1\u8BC4\u8BBA\uFF08\u63D0\u4EA4\u6CA1\u6709\u8BC4\u8BBA\u533A\uFF09\uFF0C\u8BF7\u6539\u7528 dry-run\n");
     return 2;
   }
-  const prText = flags["pr"] ?? deps.env["ACR_PULL_REQUEST"];
-  const prNumber = prText === void 0 || prText === "" ? Number.NaN : Number(prText);
+  const prNumber = await resolvePullRequestNumber({
+    flag: flags["pr"],
+    env: deps.env
+  });
   if (!isCommitMode && (!Number.isInteger(prNumber) || prNumber <= 0)) {
     deps.stderr("\u7F3A\u5C11\u5BA1\u67E5\u5BF9\u8C61\uFF1A\u7528 --pr <\u7F16\u53F7> \u5BA1\u5408\u5E76\u8BF7\u6C42\uFF0C\u6216 --commit <sha> \u5BA1\u5355\u7B14\u63D0\u4EA4\n");
     return 3;
@@ -23482,6 +24223,11 @@ async function runReviewCommand(flags, deps, dryRun) {
     },
     // 只打印模式不创建写入端口：没有端口就不可能发出写请求
     port: dryRun || isCommitMode ? null : createGitHubCommentPort(gateway, ref, headSha),
+    // 门禁的结论只能写进检查运行——评论只是通知，不会让合并按钮变红。
+    // 之前这里漏了：CheckPort 在引擎里被用到，但命令行从没创建过它，
+    // 于是「门禁能挡住合并」这条路径**根本没有入口**，不是「没验证」而是「没接线」。
+    // 只在真发时创建：dry-run 不产生任何写操作。
+    checkPort: dryRun || isCommitMode ? null : createGitHubCheckPort(gateway, ref),
     onProgress: (message) => {
       deps.stdout(`${message}
 `);
@@ -23556,10 +24302,16 @@ ${USAGE}`);
       return 0;
     }
     if (first === "eval") {
+      const datasetPath = flags["dataset"];
+      if (datasetPath !== void 0 && datasetPath !== "") {
+        return await runEvalCommand(datasetPath, flags, resolved);
+      }
       const beforePath = flags["baseline"];
       const afterPath = flags["current"];
       if (beforePath === void 0 || beforePath === "" || afterPath === void 0 || afterPath === "") {
-        stderr("\u9700\u8981\u4E24\u4EFD\u5FEB\u7167\uFF1Aacr eval --baseline <\u57FA\u51C6.json> --current <\u672C\u6B21.json>\n");
+        stderr(
+          "\u4E24\u79CD\u7528\u6CD5\u4E8C\u9009\u4E00\uFF1A\n  acr eval --dataset <\u6837\u672C\u96C6.json> --out <\u5FEB\u7167.json>   \u8DD1\u5206\n  acr eval --baseline <\u57FA\u51C6.json> --current <\u672C\u6B21.json>  \u5BF9\u6BD4\n"
+        );
         return 2;
       }
       const load = async (path) => JSON.parse(await readFile3(path, "utf8"));
@@ -23592,7 +24344,7 @@ ${USAGE}`);
       let repo = null;
       if (willWrite) {
         const token = resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env["GITHUB_TOKEN"];
-        const repoText = loaded.config.platform.repository ?? resolved.env["GITHUB_REPOSITORY"];
+        const repoText = flags["repo"] ?? loaded.config.platform.repository ?? resolved.env["GITHUB_REPOSITORY"] ?? resolved.env["ACR_REPOSITORY"];
         repo = repoText === void 0 || repoText === null ? null : parseRepo(repoText);
         if (token === void 0 || token === "" || repo === null) {
           stderr(

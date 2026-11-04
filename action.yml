@@ -41,7 +41,11 @@ runs:
       env:
         # 零配置：仓库与编号都从事件上下文里来，接入方不需要额外配置
         ACR_REPOSITORY: ${{ github.repository }}
-        ACR_PULL_REQUEST: ${{ inputs.pull-request }}
+        # 这里必须写 `||` 兜底，不能只写 inputs.pull-request：
+        # 调用方一旦写 `pull-request: ${{ inputs.pr }}`，在 PR 事件下它解析成**空串**，
+        # 而显式传入的空串会覆盖 inputs 的默认值——默认值写着 github.event.pull_request.number，
+        # 却根本没被求值。命令行还会再从 GITHUB_EVENT_PATH 兜一层，见 src/cli/event.ts。
+        ACR_PULL_REQUEST: ${{ inputs.pull-request || github.event.pull_request.number }}
         # 不传自己的令牌时回落到内置令牌。不用 inputs 的 default 填 github.token：
         # 那个上下文在 inputs 默认值里能否解析，各版本表现不一致，写在 env 里可以确定生效
         GITHUB_TOKEN: ${{ inputs.github-token || github.token }}

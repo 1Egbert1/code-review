@@ -10,6 +10,23 @@
 
 import { Octokit } from 'octokit';
 
+import { httpStatusOf } from './http-status.js';
+
+/**
+ * 这个错误是不是「资源已存在」。
+ *
+ * 不能只看状态码：422 也用于「名字非法」「颜色格式不对」。判据要看响应体里的
+ * `errors[].code`，因为 GitHub 在 422 时把具体原因放在那里，而 `message`
+ * 往往只有一句笼统的 `Validation Failed`。
+ */
+function isAlreadyExists(error: unknown): boolean {
+  if (httpStatusOf(error) !== 422) return false;
+  const data = (error as { response?: { data?: unknown } }).response?.data;
+  const body = data === undefined ? '' : JSON.stringify(data);
+  const message = error instanceof Error ? error.message : '';
+  return /already_exists/i.test(`${message} ${body}`);
+}
+
 /** 仓库标识。 */
 export interface RepoRef {
   readonly owner: string;
@@ -137,6 +154,16 @@ export interface GitHubWriteGateway {
   /** 按标签列出 issue；巡检用它找上一期报告 */
   listIssuesByLabel(ref: RepoRef, label: string): Promise<readonly RawIssue[]>;
 
+  /**
+   * 确保标签存在（不存在就建）。
+   *
+   * 为什么必须有这一步：创建 issue 时带一个**仓库里不存在的标签**，GitHub 不报错，
+   * 而是**静默丢掉这个标签**。于是「按标签找上一期」永远查不到，每次都新建一条，
+   * 一年下来几十条报告 issue——去重分支成了死代码，而日志里一切正常。
+   * 这个坑只有真跑才会发现，所以要在创建路径上显式兜住，不能指望仓库管理员先手建。
+   */
+  ensureLabel(ref: RepoRef, label: string): Promise<void>;
+
   /** 新建 issue。巡检报告创建后要立刻关闭，不留 open 条目 */
   createIssue(
     ref: RepoRef,
@@ -152,6 +179,28 @@ export interface GitHubWriteGateway {
 
   /** 关闭 issue。报告类载体必须关，否则会持续要求注意力 */
   closeIssue(ref: RepoRef, number: number): Promise<void>;
+
+  /**
+   * 写一次提交状态（commit status）。
+   *
+   * 为什么需要它：**创建检查运行（check run）必须使用 GitHub App**，
+   * 官方文档明确写着「OAuth apps and authenticated users are not able to create a check suite」。
+   * 也就是说个人令牌无论给什么权限都写不了 check run——本地调试、脚本调用全是这条路。
+   *
+   * 而 commit status 支持 fine-grained PAT（需要 `Commit statuses: write`），
+   * 并且在分支保护里同样能设为 required status check，一样能挡住合并。
+   * 代价是丢掉行级注解（annotations），只剩一个状态与一句描述。
+   */
+  createCommitStatus(
+    ref: RepoRef,
+    input: {
+      readonly sha: string;
+      readonly state: 'error' | 'failure' | 'pending' | 'success';
+      readonly context: string;
+      readonly description: string;
+      readonly targetUrl?: string;
+    },
+  ): Promise<string>;
 
   /** 写一次检查运行，返回其 id。这是「阻止合并」唯一的技术落点。 */
   createCheckRun(
@@ -421,6 +470,25 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
       }));
     },
 
+    async ensureLabel(ref, label) {
+      try {
+        // 直接建，不先查：查一次再建是两次请求，且查到了也说明不了「建的时候还在」。
+        // 已存在时 GitHub 返回 422 + already_exists，等同于成功。
+        await octokit.rest.issues.createLabel({
+          owner: ref.owner,
+          repo: ref.repo,
+          name: label,
+          color: 'ededed',
+          description: '代码审查工具写入的报告载体（自动创建）',
+        });
+      } catch (error) {
+        // 422 不止一种含义：名字非法、颜色格式不对都会 422。
+        // 只有「已存在」算成功，其余必须抛出去——否则标签其实没建出来，
+        // 而调用方以为建好了，下一轮按标签又查不到，去重重新变回每轮新建。
+        if (!isAlreadyExists(error)) throw error;
+      }
+    },
+
     async createIssue(ref, input) {
       const response = await octokit.rest.issues.create({
         owner: ref.owner,
@@ -464,6 +532,19 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
         issue_number: number,
         state: 'closed',
       });
+    },
+
+    async createCommitStatus(ref, input) {
+      const response = await octokit.rest.repos.createCommitStatus({
+        owner: ref.owner,
+        repo: ref.repo,
+        sha: input.sha,
+        state: input.state,
+        context: input.context,
+        description: input.description.slice(0, 140),
+        ...(input.targetUrl === undefined ? {} : { target_url: input.targetUrl }),
+      });
+      return String(response.data.id);
     },
 
     async createCheckRun(ref, input) {

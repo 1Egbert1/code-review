@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "label": "prompt-v1.0",
+  "createdAt": "2026-11-04T06:28:19.701Z",
+  "codeVersion": "local",
+  "promptVersions": {
+    "correctness": "v1.0",
+    "security": "v1.0",
+    "convention": "v1.0"
+  },
+  "model": "deepseek-flash",
+  "configHash": "6ed3590cb411b8c0",
+  "datasetHash": "ee91e981698de0bf",
+  "metrics": {
+    "recall": 0.05555555555555555,
+    "precision": 1,
+    "avgLatencyMs": 28718,
+    "reproducibility": 1,
+    "samples": 4
+  },
+  "cost": {
+    "uncachedInput": 0.0039918,
+    "cacheWriteShort": 0,
+    "cacheWriteLong": 0,
+    "cacheRead": 0.000031488,
+    "output": 0.0228576,
+    "total": 0.006720222
+  },
+  "detail": {
+    "samples": [
+      {
+        "id": "message-cache-boundary",
+        "expected": 5,
+        "strictHit": 0,
+        "looseHit": 0,
+        "missed": 5,
+        "falsePositives": 0,
+        "sameLineExtras": 0,
+        "exactLine": 0,
+        "missedItems": [
+          {
+            "line": 56,
+            "category": "boundary",
+            "note": "slots[slots.length] 恒越界，peekLast 永远返回 undefined"
+          },
+          {
+            "line": 51,
+            "category": "boundary",
+            "note": "cursor > capacity 差一，应为 >=，否则会写到数组边界外"
+          },
+          {
+            "line": 42,
+            "category": "logic",
+            "note": "缓存键只有 kind:version，丢了 id，不同 id 会互相串用 payload"
+          },
+          {
+            "line": 47,
+            "category": "error-handling",
+            "note": "keys 先写、JSON.parse 在后，抛错后 keys/slots 永久错位"
+          },
+          {
+            "line": 30,
+            "category": "null-safety",
+            "note": "parts[1]/parts[2] 可能是 undefined，却声明为 string"
+          }
+        ],
+        "extraItems": [],
+        "origins": {},
+        "latencyMs": 37557,
+        "stability": 1
+      },
+      {
+        "id": "api-client-secrets",
+        "expected": 7,
+        "strictHit": 1,
+        "looseHit": 0,
+        "missed": 6,
+        "falsePositives": 0,
+        "sameLineExtras": 0,
+        "exactLine": 1,
+        "missedItems": [
+          {
+            "line": 18,
+            "category": "authz",
+            "note": "只按 userId 过滤，未校验调用方是否有权访问该用户数据"
+          },
+          {
+            "line": 21,
+            "category": "error-handling",
+            "note": "未检查 response.ok 就直接解析响应体，4xx/5xx 会被当成正常数据"
+          },
+          {
+            "line": 28,
+            "category": "error-handling",
+            "note": "同上：错误响应体会抛 JSON 解析异常，错误信息指向解析而非请求失败"
+          },
+          {
+            "line": 32,
+            "category": "error-handling",
+            "note": "saveScenario 完全不看响应，保存失败时调用方以为成功了"
+          },
+          {
+            "line": 44,
+            "category": "frontend-exposure",
+            "note": "令牌存 localStorage，任何 XSS 都能读走"
+          },
+          {
+            "line": 54,
+            "category": "injection",
+            "note": "innerHTML 直接渲染后端返回内容"
+          }
+        ],
+        "extraItems": [],
+        "origins": {
+          "model-line": 1
+        },
+        "latencyMs": 33134,
+        "stability": 1
+      },
+      {
+        "id": "preference-naming",
+        "expected": 3,
+        "strictHit": 0,
+        "looseHit": 0,
+        "missed": 3,
+        "falsePositives": 0,
+        "sameLineExtras": 0,
+        "exactLine": 0,
+        "missedItems": [
+          {
+            "line": 3,
+            "category": "naming",
+            "note": "snake_case 混入 camelCase 项目"
+          },
+          {
+            "line": 17,
+            "category": "duplication",
+            "note": "与 get_user_preference 完全重复"
+          },
+          {
+            "line": 6,
+            "category": "error-handling",
+            "note": "JSON.parse 无保护，坏数据直接抛错"
+          }
+        ],
+        "extraItems": [],
+        "origins": {},
+        "latencyMs": 23905,
+        "stability": 1
+      },
+      {
+        "id": "scenario-race",
+        "expected": 3,
+        "strictHit": 0,
+        "looseHit": 0,
+        "missed": 3,
+        "falsePositives": 0,
+        "sameLineExtras": 0,
+        "exactLine": 0,
+        "missedItems": [
+          {
+            "line": 9,
+            "category": "error-handling",
+            "note": "forEach 里裸调 Promise，不 await 不 catch，异常静默丢失"
+          },
+          {
+            "line": 22,
+            "category": "concurrency",
+            "note": "后返回的请求覆盖先返回的，切换场景可能停在错误场景"
+          },
+          {
+            "line": 32,
+            "category": "logic",
+            "note": "refresh 先清缓存再异步预载，在飞的旧请求会写回脏数据"
+          }
+        ],
+        "extraItems": [],
+        "origins": {},
+        "latencyMs": 20274,
+        "stability": 1
+      }
+    ],
+    "reproducibilityMeasured": true,
+    "repeats": 2,
+    "extraUsage": {
+      "uncachedInput": 2042,
+      "cacheWriteShort": 0,
+      "cacheWriteLong": 0,
+      "cacheRead": 16512,
+      "output": 16713
+    }
+  }
+}

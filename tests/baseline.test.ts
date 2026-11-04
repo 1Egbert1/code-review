@@ -150,3 +150,42 @@ describe('快照校验', () => {
     expect(isBaselineSnapshot(snapshot())).toBe(true);
   });
 });
+
+describe('结论：召回优先于成本', () => {
+  it('召回大涨且成本同时下降时，结论要说是召回提升，不是省钱', () => {
+    const before = snapshot({
+      metrics: { ...snapshot().metrics, recall: 0.056, precision: 1 },
+      cost: COST(0.00672),
+    });
+    const after = snapshot({
+      metrics: { ...snapshot().metrics, recall: 0.889, precision: 0.516 },
+      cost: COST(0.00557),
+    });
+
+    const result = compareBaselines(before, after);
+    if (!result.comparable) throw new Error('应当可比');
+
+    // 旧规则会写成「成本明显下降且召回未退」，把一次召回 6%→89% 的修复说成省钱
+    expect(result.verdict).toContain('召回显著提升');
+    expect(result.verdict).not.toContain('净收益');
+  });
+
+  it('召回涨但命中率大跌时，结论要多说一句「需看明细」', () => {
+    const before = snapshot({ metrics: { ...snapshot().metrics, recall: 0.2, precision: 0.95 } });
+    const after = snapshot({ metrics: { ...snapshot().metrics, recall: 0.8, precision: 0.4 } });
+
+    const result = compareBaselines(before, after);
+    if (!result.comparable) throw new Error('应当可比');
+
+    expect(result.verdict).toContain('召回显著提升');
+    expect(result.verdict).toContain('命中率');
+  });
+
+  it('指标名是「标注命中率」而不是「精确率」：分母含未标注的真问题', () => {
+    const result = compareBaselines(snapshot(), snapshot());
+    if (!result.comparable) throw new Error('应当可比');
+
+    expect(result.metrics.map((metric) => metric.name)).toContain('标注命中率');
+    expect(result.metrics.map((metric) => metric.name)).not.toContain('精确率');
+  });
+});

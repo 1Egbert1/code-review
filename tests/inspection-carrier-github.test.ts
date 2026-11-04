@@ -15,6 +15,8 @@ interface FakeGateway {
   created: { title: string; body: string; labels: readonly string[] }[];
   updated: { number: number; title?: string; body?: string }[];
   closed: number[];
+  /** 标签是否已确保存在；创建前必须有一次 */
+  ensured: string[];
   failCreate: boolean;
 }
 
@@ -32,6 +34,9 @@ function gateway(state: FakeGateway): GitHubWriteGateway {
   return {
     async listIssuesByLabel() {
       return state.issues;
+    },
+    async ensureLabel(_ref: RepoRef, label: string) {
+      state.ensured.push(label);
     },
     async createIssue(
       _ref: RepoRef,
@@ -58,7 +63,7 @@ function gateway(state: FakeGateway): GitHubWriteGateway {
 }
 
 function emptyState(): FakeGateway {
-  return { issues: [], created: [], updated: [], closed: [], failCreate: false };
+  return { issues: [], created: [], updated: [], closed: [], ensured: [], failCreate: false };
 }
 
 describe('Issue 载体', () => {
@@ -71,6 +76,25 @@ describe('Issue 载体', () => {
     expect(state.created[0]?.labels).toEqual([INSPECTION_LABEL]);
     // 编号由平台生成，这里只关心「创建后确实关掉了」
     expect(state.closed).toHaveLength(1);
+  });
+
+  it('新建前先确保标签存在：否则平台会静默丢掉标签，去重从此失效', async () => {
+    const state = emptyState();
+    const writer = createGitHubIssueWriter(gateway(state), REF);
+
+    await writer.write('2026-11-03', '# 报告');
+    // 这条断言守的是「去重能不能持续成立」：标签没建出来，下一轮按标签查就是空集，
+    // 于是每轮新建一条，而任何一次写入的返回值都是 ok——线上看不出来。
+    expect(state.ensured).toEqual([INSPECTION_LABEL]);
+  });
+
+  it('复用已有报告时不再重复建标签', async () => {
+    const state = emptyState();
+    state.issues.push(issue(7));
+    const writer = createGitHubIssueWriter(gateway(state), REF);
+
+    await writer.write('2026-11-03', '# 报告');
+    expect(state.ensured).toHaveLength(0);
   });
 
   it('已有报告时更新同一条，不新建第二条', async () => {

@@ -15,9 +15,21 @@
 import type { InspectionConfig } from '../../contracts/config.js';
 import type { ReportCarrier, ReportLocation } from '../../contracts/inspection.js';
 
-/** 写入结果。失败要带可读原因——「报告没生成」是最难排查的一种失败。 */
+/**
+ * 写入结果。失败要带可读原因——「报告没生成」是最难排查的一种失败。
+ *
+ * 成功分支带一个可选 `warning`：有些操作是「主目标达成、附带动作失败」。
+ * 典型例子是报告写进去了但没能把 Issue 关掉（缺 `issues: write`）——
+ * 报告确实在了，可 open 状态的条目会一直打扰人。这种情况报失败是错的
+ * （正文在），报纯净成功也是错的（破坏「不留 open 条目」的约束），必须是「成功 + 告警」。
+ */
 export type WriteOutcome =
-  | { readonly ok: true; readonly reference: string; readonly url: string }
+  | {
+      readonly ok: true;
+      readonly reference: string;
+      readonly url: string;
+      readonly warning?: string;
+    }
   | { readonly ok: false; readonly reason: string };
 
 /** 一个载体。做成接口，是为了让降级逻辑与平台无关。 */
@@ -70,19 +82,22 @@ export async function writeReport(input: WriteReportInput): Promise<WriteReportR
 
     const outcome = await writer.write(input.pageName, input.markdown);
     if (outcome.ok) {
+      const notices = [
+        ...(warning === null
+          ? []
+          : [`${warning}，已改为写入${carrier === 'wiki' ? ' Wiki' : ' Issue'}`]),
+        ...(outcome.warning === undefined ? [] : [outcome.warning]),
+      ];
       return {
         location: { carrier: writer.kind, reference: outcome.reference, url: outcome.url },
-        warning:
-          warning === null
-            ? null
-            : `${warning}，已改为写入${carrier === 'wiki' ? ' Wiki' : ' Issue'}`,
+        warning: notices.length === 0 ? null : notices.join('；'),
       };
     }
 
-    warning =
-      warning === null
-        ? `写入${carrier === 'wiki' ? ' Wiki ' : ' Issue '}失败：${outcome.reason}`
-        : warning;
+    // 累加而不是「已有就保留」：之前写法在 wiki 与 issue 都失败时只报第一条，
+    // 后面的失败被静默吞掉——用户看到「Wiki 失败」就以为 Issue 成功了，实际两条都没成。
+    const reason = `写入${carrier === 'wiki' ? ' Wiki ' : ' Issue '}失败：${outcome.reason}`;
+    warning = warning === null ? reason : `${warning}；${reason}`;
   }
 
   return { location: null, warning: warning ?? '没有可用的报告载体' };
