@@ -11,12 +11,21 @@
 
 import type { ResolvedConfig } from '../contracts/config.js';
 
-/** 默认跳过的文件。锁文件、产物、压缩文件对审查没有价值，只会烧 token。 */
+/**
+ * 默认跳过的文件：锁文件、构建产物、压缩文件，以及 Markdown 文档。
+ *
+ * Markdown 不是「审不出问题」——实测在规格书里找出过前后不一致；
+ * 但几千行的文档会吃掉单次调用的大部分上下文，代价与收益不成比例。
+ * 想审文档时，显式写一份不含 Markdown 通配项的 skipPaths 即可：
+ * 配置合并里数组是整体替换，不是追加（见 merge.ts）。
+ * （注释里不能直接写那个 glob：其中的星号加斜杠会把块注释提前闭合。）
+ */
 const DEFAULT_SKIP_PATHS: readonly string[] = [
   '**/*.lock',
   '**/dist/**',
   '**/*.min.js',
   '**/vendor/**',
+  '**/*.md',
 ];
 
 /** 默认配置。任何一层都没有提供时使用。 */

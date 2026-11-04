@@ -8701,7 +8701,8 @@ var DEFAULT_SKIP_PATHS = [
   "**/*.lock",
   "**/dist/**",
   "**/*.min.js",
-  "**/vendor/**"
+  "**/vendor/**",
+  "**/*.md"
 ];
 var DEFAULT_CONFIG = {
   configVersion: 1,

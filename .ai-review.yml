@@ -31,12 +31,15 @@ llm:
     cacheReadMultiplier: 0.02
 
 review:
-  # 构建产物与样本不进审查：审它们既没意义，还会把 token 烧在压缩代码上
+  # 构建产物、样本与 Markdown 文档（含 README）不进审查：既没意义，还会把 token
+  # 烧在压缩代码和几千行的文档上。注意 skipPaths 是整组**覆盖**默认值而不是追加，
+  # 所以这里一旦写了这一节，就必须把默认清单里的 `**/*.md` 一起带上。
   skipPaths:
     - '**/*.lock'
     - 'dist/**'
     - 'fixtures/**'
     - 'evals/**'
+    - '**/*.md'
   maxInlineComments: 10
   dimensions:
     correctness:

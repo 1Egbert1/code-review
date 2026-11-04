@@ -44,6 +44,15 @@ describe('默认配置', () => {
     const config = expectOk(resolveConfig([]));
     expect(config.review.dimensions.convention.enabled).toBe(false);
   });
+
+  it('默认不审 Markdown，但显式写一份清单就能审回来', () => {
+    const defaults = expectOk(resolveConfig([]));
+    expect(defaults.review.skipPaths).toContain('**/*.md');
+
+    // 数组是整体替换：想审文档的人不会被默认值偷偷追加回来。
+    const custom = expectOk(resolveConfig([{ review: { skipPaths: ['dist/**'] } }]));
+    expect(custom.review.skipPaths).toEqual(['dist/**']);
+  });
 });
 
 describe('深合并', () => {
