@@ -61,7 +61,13 @@ function originSection(findings: readonly Finding[]): string {
   return `定位来源：${parts.length === 0 ? '（无）' : parts.join('，')}`;
 }
 
-function rejectionSection(result: ReviewResult): string[] {
+/**
+ * 丢弃记录。
+ *
+ * `verbose` 为真时输出每条明细。这不是「调试日志」——dry-run 的核心用途就是
+ * 回答「它为什么没报出我看到的问题」，没有明细的时候，这句话只能靠猜。
+ */
+function rejectionSection(result: ReviewResult, verbose: boolean): string[] {
   if (result.rejections.length === 0) return [];
 
   const counts = new Map<RejectionReason, number>();
@@ -74,7 +80,20 @@ function rejectionSection(result: ReviewResult): string[] {
     .map(([reason, count]) => `${REASON_LABEL[reason]} ${String(count)}`)
     .join('，');
 
-  return [`丢弃 ${String(result.rejections.length)} 条`, `  丢弃原因：${detail}`];
+  const lines = [`丢弃 ${String(result.rejections.length)} 条`, `  丢弃原因：${detail}`];
+
+  if (verbose) {
+    for (const rejection of result.rejections.slice(0, 10)) {
+      const where = `${rejection.file}:${String(rejection.line)}`;
+      lines.push(`  · [${rejection.reviewer}] ${where} ${rejection.title.slice(0, 50)}`);
+      lines.push(`    原因：${rejection.detail}`);
+    }
+    if (result.rejections.length > 10) {
+      lines.push(`  · 另有 ${String(result.rejections.length - 10)} 条未列出`);
+    }
+  }
+
+  return lines;
 }
 
 /** 生成结束统计。纯函数，便于对着固定输入断言。 */
@@ -123,7 +142,7 @@ export function formatStats(input: StatsInput): string {
   }
 
   lines.push(originSection(result.findings));
-  lines.push(...rejectionSection(result));
+  lines.push(...rejectionSection(result, input.dryRun));
 
   // 这句必须打印：让用户知道超限只是换了位置，没有任何通过校验的条目被丢弃
   lines.push('行内 + 摘要合计未丢任何通过校验的条目');
