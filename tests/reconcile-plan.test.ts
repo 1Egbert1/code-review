@@ -141,8 +141,12 @@ describe('几个必须区分的边界', () => {
 
 describe('已修复提示', () => {
   it('带上时间，且可嵌在正文最前面', () => {
-    expect(resolvedNotice('2026-11-02T10:00:00Z')).toBe(
-      '> 该问题已在后续提交中修复（2026-11-02T10:00:00Z）。',
-    );
+    const notice = resolvedNotice('2026-11-02T10:00:00Z');
+
+    expect(notice).toContain('2026-11-02T10:00:00Z');
+    // 措辞不能断言成「已修复」：模型每轮定位有波动，「本轮没报」不等于问题消失，
+    // 写成肯定句会让作者以为问题没了，而它还在
+    expect(notice).toContain('本轮未再发现此问题');
+    expect(notice).not.toContain('已在后续提交中修复');
   });
 });

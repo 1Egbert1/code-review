@@ -133,5 +133,8 @@ export function planActions(options: PlanOptions): PlanOutcome {
 
 /** 已修复评论的正文前缀。保留原文，只在最前面加一行说明。 */
 export function resolvedNotice(isoTime: string): string {
-  return `> 该问题已在后续提交中修复（${isoTime}）。`;
+  // 措辞不能写死成「已修复」。真实跑下来发现，模型对同一个缺陷的定位与措辞每轮都会小幅波动，
+  // 「这一轮没再报」既可能是真修好了，也可能只是这次没抽到它。写成前者会让作者以为问题消失，
+  // 而它还在——那比不标记更糟。
+  return `> 本轮未再发现此问题（${isoTime}）。可能是已修复，也可能是本次审查未覆盖到，请自行确认。`;
 }

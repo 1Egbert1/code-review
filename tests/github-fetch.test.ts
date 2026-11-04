@@ -34,7 +34,7 @@ function gateway(overrides: Partial<GitHubGateway> = {}): GitHubGateway {
     getFileContent: async () => null,
     listReviewComments: async () => [],
     getRepoInfo: async () => ({ hasWiki: false, defaultBranch: 'main' }),
-    getPullRequestHeadSha: async () => 'head-sha',
+    getPullRequestShas: async () => ({ head: 'head-sha', base: 'base-sha' }),
     getCommit: async () => ({ sha: 'head-sha', parentSha: 'base-sha', summary: '提交' }),
     compareCommits: async () => [],
     ...overrides,

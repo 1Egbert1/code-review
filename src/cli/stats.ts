@@ -111,9 +111,11 @@ export function formatStats(input: StatsInput): string {
   );
 
   lines.push(
-    `行内 ${String(result.actions.filter((action) => action.kind === 'create').length)} 条，摘要 ${String(
-      result.summaryOnly.length,
-    )} 条${routed > 0 ? `（其中 ${String(routed)} 条因行内已满被路由）` : ''}`,
+    // 「摘要 1 条」指那条汇总评论；routed 是被行内挤下来、只能写进摘要的问题数。
+    // 早先这行把两个数字写成一个，读起来像「摘要评论有 N 条」，对不上实际。
+    `行内 ${String(result.actions.filter((action) => action.kind === 'create').length)} 条；摘要评论 1 条${
+      routed > 0 ? `（另 ${String(routed)} 条问题因行内已满放进摘要）` : ''
+    }`,
   );
 
   // 成本构成：只报总额看不出省在哪
@@ -142,6 +144,17 @@ export function formatStats(input: StatsInput): string {
   }
 
   lines.push(originSection(result.findings));
+
+  // dry-run 时列出每条结论的指纹与原始证据：排查「为什么两轮认不出是同一条」时，
+  // 只看渲染后的评论没有用——指纹算的是原始 evidence，而它可能带看不见的空白差异
+  if (input.dryRun && result.findings.length > 0) {
+    lines.push('结论指纹：');
+    for (const finding of result.findings.slice(0, 12)) {
+      const where = `${finding.anchor.file}:${String(finding.anchor.newLine ?? finding.anchor.oldLine ?? 0)}`;
+      lines.push(`  · ${finding.fingerprint} ${where}`);
+      lines.push(`    证据=${JSON.stringify(finding.evidence)}`);
+    }
+  }
   lines.push(...rejectionSection(result, input.dryRun));
 
   // 这句必须打印：让用户知道超限只是换了位置，没有任何通过校验的条目被丢弃

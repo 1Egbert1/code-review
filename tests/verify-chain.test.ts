@@ -176,3 +176,56 @@ describe('校验链', () => {
     expect(outcome.rejections[0]?.detail).toContain('找不到');
   });
 });
+
+describe('指纹的稳定性', () => {
+  it('标题措辞变化不影响指纹：模型对同一个缺陷每次叫法都不同', () => {
+    const a = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'correctness',
+      title: 'keys 已写入而 slots 未更新',
+      evidence: '      payload: JSON.parse(payload),',
+    });
+    const b = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'correctness',
+      title: 'JSON.parse 抛错时缓存永久错位',
+      evidence: '      payload: JSON.parse(payload),',
+    });
+
+    expect(a).toBe(b);
+  });
+
+  it('代码改动后指纹必须变：这是豁免自动失效的依据', () => {
+    const before = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'correctness',
+      title: '同一句话',
+      evidence: 'const x = 1;',
+    });
+    const after = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'correctness',
+      title: '同一句话',
+      evidence: 'const x = 2;',
+    });
+
+    expect(before).not.toBe(after);
+  });
+
+  it('维度不同指纹不同：同一行代码可能被两个维度各自指出', () => {
+    const correctness = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'correctness',
+      title: '同一句话',
+      evidence: 'const x = 1;',
+    });
+    const security = computeFingerprint({
+      file: 'src/a.ts',
+      reviewer: 'security',
+      title: '同一句话',
+      evidence: 'const x = 1;',
+    });
+
+    expect(correctness).not.toBe(security);
+  });
+});

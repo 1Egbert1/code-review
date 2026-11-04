@@ -10244,7 +10244,7 @@ function planActions(options) {
   return { actions, warnings, outdatedKept };
 }
 function resolvedNotice(isoTime) {
-  return `> \u8BE5\u95EE\u9898\u5DF2\u5728\u540E\u7EED\u63D0\u4EA4\u4E2D\u4FEE\u590D\uFF08${isoTime}\uFF09\u3002`;
+  return `> \u672C\u8F6E\u672A\u518D\u53D1\u73B0\u6B64\u95EE\u9898\uFF08${isoTime}\uFF09\u3002\u53EF\u80FD\u662F\u5DF2\u4FEE\u590D\uFF0C\u4E5F\u53EF\u80FD\u662F\u672C\u6B21\u5BA1\u67E5\u672A\u8986\u76D6\u5230\uFF0C\u8BF7\u81EA\u884C\u786E\u8BA4\u3002`;
 }
 
 // src/core/cost/pricing.ts
@@ -13132,9 +13132,7 @@ function normalize(evidence) {
   return evidence.replace(/\s+/g, " ").trim();
 }
 function computeFingerprint(input) {
-  const payload = [input.file, input.reviewer, input.title, normalize(input.evidence)].join(
-    "\0"
-  );
+  const payload = [input.file, input.reviewer, normalize(input.evidence)].join("\0");
   return createHash2("sha256").update(payload, "utf8").digest("hex").slice(0, 16);
 }
 
@@ -21476,13 +21474,13 @@ function createGitHubGateway(token) {
         deletions: file.deletions
       }));
     },
-    async getPullRequestHeadSha(ref) {
+    async getPullRequestShas(ref) {
       const response = await octokit.rest.pulls.get({
         owner: ref.owner,
         repo: ref.repo,
         pull_number: ref.number
       });
-      return response.data.head.sha;
+      return { head: response.data.head.sha, base: response.data.base.sha };
     },
     async createReviewComment(ref, input) {
       const response = await octokit.rest.pulls.createReviewComment({
@@ -21928,7 +21926,7 @@ function toDiffFile(raw, skipPaths) {
   }
   return parsed;
 }
-async function fetchSnapshot(gateway, ref, headSha, skipPaths = []) {
+async function fetchSnapshot(gateway, ref, headSha, skipPaths = [], baseSha = "") {
   const warnings = [];
   const rawFiles = await gateway.listPullRequestFiles(ref);
   const files = rawFiles.map((raw) => toDiffFile(raw, skipPaths));
@@ -21950,7 +21948,7 @@ async function fetchSnapshot(gateway, ref, headSha, skipPaths = []) {
   }
   return {
     snapshot: {
-      diff: { files, baseSha: "", headSha },
+      diff: { files, baseSha, headSha },
       fileContents,
       existingComments,
       // SPEC-GAP：仓库约定文件与构建上下文在 T-06（上下文装配）补齐
@@ -23141,9 +23139,9 @@ function formatStats(input) {
     )} tok \u8F93\u51FA ${formatTokens(tokens.output)} tok ${costLine(result)}`
   );
   lines.push(
-    `\u884C\u5185 ${String(result.actions.filter((action) => action.kind === "create").length)} \u6761\uFF0C\u6458\u8981 ${String(
-      result.summaryOnly.length
-    )} \u6761${routed > 0 ? `\uFF08\u5176\u4E2D ${String(routed)} \u6761\u56E0\u884C\u5185\u5DF2\u6EE1\u88AB\u8DEF\u7531\uFF09` : ""}`
+    // 「摘要 1 条」指那条汇总评论；routed 是被行内挤下来、只能写进摘要的问题数。
+    // 早先这行把两个数字写成一个，读起来像「摘要评论有 N 条」，对不上实际。
+    `\u884C\u5185 ${String(result.actions.filter((action) => action.kind === "create").length)} \u6761\uFF1B\u6458\u8981\u8BC4\u8BBA 1 \u6761${routed > 0 ? `\uFF08\u53E6 ${String(routed)} \u6761\u95EE\u9898\u56E0\u884C\u5185\u5DF2\u6EE1\u653E\u8FDB\u6458\u8981\uFF09` : ""}`
   );
   if (tokens.uncachedInput + tokens.cacheRead + tokens.cacheWriteShort + tokens.cacheWriteLong > 0) {
     lines.push(
@@ -23162,6 +23160,14 @@ function formatStats(input) {
     lines.push(`\u6210\u672C\u6784\u6210\uFF1A${parts.join(" \xB7 ")}`);
   }
   lines.push(originSection(result.findings));
+  if (input.dryRun && result.findings.length > 0) {
+    lines.push("\u7ED3\u8BBA\u6307\u7EB9\uFF1A");
+    for (const finding of result.findings.slice(0, 12)) {
+      const where = `${finding.anchor.file}:${String(finding.anchor.newLine ?? finding.anchor.oldLine ?? 0)}`;
+      lines.push(`  \xB7 ${finding.fingerprint} ${where}`);
+      lines.push(`    \u8BC1\u636E=${JSON.stringify(finding.evidence)}`);
+    }
+  }
   lines.push(...rejectionSection(result, input.dryRun));
   lines.push("\u884C\u5185 + \u6458\u8981\u5408\u8BA1\u672A\u4E22\u4EFB\u4F55\u901A\u8FC7\u6821\u9A8C\u7684\u6761\u76EE");
   lines.push(
@@ -23356,15 +23362,13 @@ async function runReviewCommand(flags, deps, dryRun) {
     headers: config.llm.headers,
     structuredOutput: config.llm.structuredOutput
   });
-  let headSha = "";
+  const shas = isCommitMode ? { head: "", base: "" } : await gateway.getPullRequestShas(ref);
+  const headSha = shas.head;
   const result = await runReview(request2, {
     config,
     client,
     fetchSnapshot: async () => {
-      const fetched = isCommitMode ? await fetchCommitSnapshot(gateway, repo, commitText, config.review.skipPaths) : await (async () => {
-        headSha = await gateway.getPullRequestHeadSha(ref);
-        return fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
-      })();
+      const fetched = isCommitMode ? await fetchCommitSnapshot(gateway, repo, commitText, config.review.skipPaths) : await fetchSnapshot(gateway, ref, headSha, config.review.skipPaths, shas.base);
       for (const warning of fetched.warnings) deps.stderr(`\u544A\u8B66\uFF1A${warning.message}
 `);
       return fetched.snapshot;

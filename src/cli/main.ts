@@ -258,7 +258,13 @@ async function runReviewCommand(
     structuredOutput: config.llm.structuredOutput,
   });
 
-  let headSha = '';
+  // 头部提交号必须在**创建写入端口之前**取到。
+  //
+  // 之前是在 fetchSnapshot 里取的，而 port 是作为参数先求值的——等到真正发评论时，
+  // 传进 port 的还是初始化时的空字符串，平台直接拒收：「commit_id is not part of
+  // the pull request」。dry-run 不创建 port，所以单测和干跑都碰不到这条路径。
+  const shas = isCommitMode ? { head: '', base: '' } : await gateway.getPullRequestShas(ref);
+  const headSha = shas.head;
 
   const result: ReviewResult = await runReview(request, {
     config,
@@ -266,10 +272,7 @@ async function runReviewCommand(
     fetchSnapshot: async () => {
       const fetched = isCommitMode
         ? await fetchCommitSnapshot(gateway, repo, commitText, config.review.skipPaths)
-        : await (async () => {
-            headSha = await gateway.getPullRequestHeadSha(ref);
-            return fetchSnapshot(gateway, ref, headSha, config.review.skipPaths);
-          })();
+        : await fetchSnapshot(gateway, ref, headSha, config.review.skipPaths, shas.base);
 
       for (const warning of fetched.warnings) deps.stderr(`告警：${warning.message}\n`);
       return fetched.snapshot;

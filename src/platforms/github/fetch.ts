@@ -102,6 +102,7 @@ export async function fetchSnapshot(
   ref: PullRequestRef,
   headSha: string,
   skipPaths: readonly string[] = [],
+  baseSha = '',
 ): Promise<SnapshotResult> {
   const warnings: ReviewWarning[] = [];
 
@@ -130,7 +131,7 @@ export async function fetchSnapshot(
 
   return {
     snapshot: {
-      diff: { files, baseSha: '', headSha },
+      diff: { files, baseSha, headSha },
       fileContents,
       existingComments,
       // SPEC-GAP：仓库约定文件与构建上下文在 T-06（上下文装配）补齐

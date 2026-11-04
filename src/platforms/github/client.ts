@@ -75,12 +75,15 @@ export interface GitHubGateway {
   getRepoInfo(ref: RepoRef): Promise<RepoInfo>;
 
   /**
-   * 取合并请求当前的头部提交号。
+   * 取合并请求当前的头部与基准提交号。
    *
-   * 创建行内评论与取文件内容都要用它，且必须**当场取**——用上一轮缓存的值
+   * head 用于创建行内评论与取文件内容，必须**当场取**——用上一轮缓存的值
    * 在新提交推上来之后会把评论贴到错误的提交上。
+   * base 只用于在摘要里写出「对比基准」，省掉的是一次单独请求。
    */
-  getPullRequestHeadSha(ref: PullRequestRef): Promise<string>;
+  getPullRequestShas(
+    ref: PullRequestRef,
+  ): Promise<{ readonly head: string; readonly base: string }>;
 
   /** 读一笔提交的元信息。审 commit 时要用它的父提交作为对比基准。 */
   getCommit(ref: RepoRef, sha: string): Promise<CommitInfo>;
@@ -298,13 +301,13 @@ export function createGitHubGateway(token: string): GitHubFullGateway {
       }));
     },
 
-    async getPullRequestHeadSha(ref) {
+    async getPullRequestShas(ref) {
       const response = await octokit.rest.pulls.get({
         owner: ref.owner,
         repo: ref.repo,
         pull_number: ref.number,
       });
-      return response.data.head.sha;
+      return { head: response.data.head.sha, base: response.data.base.sha };
     },
 
     async createReviewComment(ref, input) {
