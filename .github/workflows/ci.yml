@@ -1,0 +1,43 @@
+# 持续集成。
+#
+# 这里跑的就是本机那句 `pnpm run ci`，不另起一套：本地能过、CI 也一定过，
+# 否则会出现「本地全绿、推送就红」这种最消耗信任的差异。
+#
+# 其中 verify:dist 是重点：它重新构建到临时文件再与入库的 dist 逐字节比对。
+# 「改了源码忘了重新构建」是本项目最容易犯、且本地测试发现不了的错误——
+# 产物入库是为了让 Action 能直接执行，一旦 dist 与源码脱节，跑的就是旧逻辑。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # --frozen-lockfile：锁文件与 package.json 不一致时直接失败，
+      # 而不是悄悄装一份可能不同的依赖树
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run ci
