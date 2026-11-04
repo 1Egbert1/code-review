@@ -66,5 +66,8 @@ jobs:
           # 想让它真发，去 Settings → Secrets and variables → Actions → Variables
           # 建一个 ACR_MODE=review。这是明文变量，不是密钥，所以放 Variables 不是 Secrets。
           mode: ${{ inputs.mode || vars.ACR_MODE || 'dry-run' }}
-          # 手动触发时需要显式传 PR 编号；pull_request_target 触发时留空，由事件上下文提供
+          # 手动触发时需要显式传 PR 编号；PR 事件下这个表达式是空串。
+          # 空串不等于「没传」——它会覆盖 action 里 `github.event.pull_request.number` 这个默认值。
+          # action 与本工具的命令行各有一层兜底（见 src/cli/event.ts），所以这里这样写是安全的；
+          # 但如果你在改这个文件，别把兜底删掉。
           pull-request: ${{ inputs.pr }}

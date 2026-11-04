@@ -23749,6 +23749,55 @@ async function readOptional(root, name) {
   }
 }
 
+// src/cli/event.ts
+var NUMBER_PATHS = [
+  ["pull_request", "number"],
+  ["issue", "number"],
+  ["inputs", "pr"]
+];
+function numberFromEventPayload(payload) {
+  for (const path of NUMBER_PATHS) {
+    let node = payload;
+    for (const key of path) {
+      if (typeof node !== "object" || node === null) {
+        node = void 0;
+        break;
+      }
+      node = node[key];
+    }
+    const value = typeof node === "string" ? Number(node) : node;
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  }
+  return null;
+}
+async function resolvePullRequestNumber(input) {
+  const fromFlag = toNumber(input.flag);
+  if (fromFlag !== null) return fromFlag;
+  const fromEnv = toNumber(input.env["ACR_PULL_REQUEST"]);
+  if (fromEnv !== null) return fromEnv;
+  const eventPath = input.env["GITHUB_EVENT_PATH"];
+  if (eventPath === void 0 || eventPath.trim() === "") return Number.NaN;
+  try {
+    const read = input.readEventFile ?? defaultReadEventFile;
+    const parsed = JSON.parse(await read(eventPath));
+    const fromEvent = numberFromEventPayload(parsed);
+    return fromEvent ?? Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
+}
+function toNumber(text2) {
+  if (text2 === void 0) return null;
+  const trimmed = text2.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+async function defaultReadEventFile(path) {
+  const { readFile: readFile4 } = await import("node:fs/promises");
+  return readFile4(path, "utf8");
+}
+
 // src/cli/stats.ts
 var ORIGIN_LABEL = {
   "model-line": "\u6A21\u578B\u884C\u53F7",
@@ -24077,8 +24126,10 @@ async function runReviewCommand(flags, deps, dryRun) {
     deps.stderr("\u6309\u63D0\u4EA4\u5BA1\u67E5\u4E0D\u652F\u6301\u53D1\u8BC4\u8BBA\uFF08\u63D0\u4EA4\u6CA1\u6709\u8BC4\u8BBA\u533A\uFF09\uFF0C\u8BF7\u6539\u7528 dry-run\n");
     return 2;
   }
-  const prText = flags["pr"] ?? deps.env["ACR_PULL_REQUEST"];
-  const prNumber = prText === void 0 || prText === "" ? Number.NaN : Number(prText);
+  const prNumber = await resolvePullRequestNumber({
+    flag: flags["pr"],
+    env: deps.env
+  });
   if (!isCommitMode && (!Number.isInteger(prNumber) || prNumber <= 0)) {
     deps.stderr("\u7F3A\u5C11\u5BA1\u67E5\u5BF9\u8C61\uFF1A\u7528 --pr <\u7F16\u53F7> \u5BA1\u5408\u5E76\u8BF7\u6C42\uFF0C\u6216 --commit <sha> \u5BA1\u5355\u7B14\u63D0\u4EA4\n");
     return 3;

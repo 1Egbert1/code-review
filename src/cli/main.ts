@@ -49,6 +49,7 @@ import type { HistoryEntry } from '../core/inspection/history.js';
 import { renderReport } from '../core/inspection/report.js';
 import { runInspection } from '../core/inspection/run.js';
 import { collectSourceFiles, readOptional } from './walk.js';
+import { resolvePullRequestNumber } from './event.js';
 import { formatComparison, formatStats } from './stats.js';
 
 const COMMANDS = ['review', 'dry-run', 'inspect', 'cost', 'eval'] as const;
@@ -322,8 +323,10 @@ async function runReviewCommand(
     return 2;
   }
 
-  const prText = flags['pr'] ?? deps.env['ACR_PULL_REQUEST'];
-  const prNumber = prText === undefined || prText === '' ? Number.NaN : Number(prText);
+  const prNumber = await resolvePullRequestNumber({
+    flag: flags['pr'],
+    env: deps.env,
+  });
 
   if (!isCommitMode && (!Number.isInteger(prNumber) || prNumber <= 0)) {
     deps.stderr('缺少审查对象：用 --pr <编号> 审合并请求，或 --commit <sha> 审单笔提交\n');
