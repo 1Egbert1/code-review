@@ -10247,6 +10247,103 @@ function resolvedNotice(isoTime) {
   return `> \u672C\u8F6E\u672A\u518D\u53D1\u73B0\u6B64\u95EE\u9898\uFF08${isoTime}\uFF09\u3002\u53EF\u80FD\u662F\u5DF2\u4FEE\u590D\uFF0C\u4E5F\u53EF\u80FD\u662F\u672C\u6B21\u5BA1\u67E5\u672A\u8986\u76D6\u5230\uFF0C\u8BF7\u81EA\u884C\u786E\u8BA4\u3002`;
 }
 
+// src/core/rules/secrets.ts
+var PATTERNS = [
+  {
+    kind: "openai-style",
+    label: "OpenAI / DeepSeek \u98CE\u683C API key",
+    pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/
+  },
+  {
+    kind: "github-fine-grained",
+    label: "GitHub \u7EC6\u7C92\u5EA6\u4EE4\u724C",
+    pattern: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/
+  },
+  {
+    kind: "github-token",
+    label: "GitHub \u4EE4\u724C",
+    pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/
+  },
+  {
+    kind: "aws-access-key",
+    label: "AWS \u8BBF\u95EE\u5BC6\u94A5 ID",
+    pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
+  },
+  {
+    kind: "google-api-key",
+    label: "Google API key",
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/
+  },
+  {
+    kind: "slack-token",
+    label: "Slack \u4EE4\u724C",
+    pattern: /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/
+  },
+  {
+    kind: "private-key",
+    label: "\u79C1\u94A5\u5185\u5BB9",
+    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----/
+  },
+  {
+    kind: "jwt",
+    label: "JWT \u4EE4\u724C",
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/
+  }
+];
+function looksLikePlaceholder(raw) {
+  const body = raw.replace(/^(sk|gh[pousr]|github_pat|AKIA|ASIA|AIza|xox[baprs]|eyJ)[-_]?/i, "");
+  const compact = body.replace(/[-_]/g, "");
+  if (compact.length === 0) return true;
+  const distinct = new Set(compact).size;
+  if (distinct < compact.length * 0.3) return true;
+  return /(?:your|placeholder|changeme|dummy|sample|replace[-_]?me)/i.test(compact);
+}
+function scanSecrets(diff) {
+  const hits = [];
+  for (const file of diff.files) {
+    if (file.skippedReason !== null) continue;
+    for (const line of file.lines) {
+      if (line.anchor.kind !== "added" || line.anchor.newLine === null) continue;
+      for (const { kind, label, pattern } of PATTERNS) {
+        const match = pattern.exec(line.text);
+        if (match === null) continue;
+        if (looksLikePlaceholder(match[0])) continue;
+        hits.push({
+          file: file.path,
+          line: line.anchor.newLine,
+          kind,
+          label,
+          evidence: line.text.trim()
+        });
+        break;
+      }
+    }
+  }
+  return hits;
+}
+function secretsToFindings(hits) {
+  return hits.map((hit) => ({
+    file: hit.file,
+    line: hit.line,
+    side: "new",
+    severity: "blocker",
+    category: "secret-exposure",
+    title: `\u6E90\u7801\u91CC\u786C\u7F16\u7801\u4E86 ${hit.label}`,
+    body: [
+      `\u8FD9\u4E00\u884C\u628A\u51ED\u8BC1\u76F4\u63A5\u5199\u8FDB\u4E86\u4EE3\u7801\uFF0C\u683C\u5F0F\u5339\u914D ${hit.label}\u3002`,
+      "",
+      "\u540E\u679C\uFF1A\u80FD\u8BFB\u5230\u8FD9\u4E2A\u4ED3\u5E93\u7684\u4EBA\u90FD\u80FD\u62FF\u5230\u5B83\u2014\u2014\u5305\u62EC fork\u3001CI \u65E5\u5FD7\u3001\u4EE5\u53CA\u5386\u53F2\u63D0\u4EA4\u3002",
+      "\u5220\u6389\u8FD9\u4E00\u884C\u5E76\u4E0D\u80FD\u8BA9\u5B83\u5931\u6548\uFF0C\u51ED\u8BC1\u5DF2\u7ECF\u5728\u5386\u53F2\u91CC\u4E86\u3002",
+      "",
+      "**\u5904\u7406**\uFF1A\u7ACB\u5373\u5230\u7B7E\u53D1\u65B9\u4F5C\u5E9F\u5E76\u91CD\u65B0\u751F\u6210\uFF1B\u65B0\u503C\u653E\u73AF\u5883\u53D8\u91CF\u6216\u5BC6\u94A5\u7BA1\u7406\u670D\u52A1\uFF0C",
+      "\u518D\u628A\u8FD9\u884C\u6539\u6210\u4ECE\u73AF\u5883\u8BFB\u53D6\u3002"
+    ].join("\n"),
+    evidence: hit.evidence,
+    suggestion: "\u6539\u4E3A\u4ECE\u73AF\u5883\u53D8\u91CF\u6216\u5BC6\u94A5\u7BA1\u7406\u670D\u52A1\u8BFB\u53D6\uFF0C\u5E76\u8F6E\u6362\u5DF2\u7ECF\u6CC4\u9732\u7684\u51ED\u8BC1\u3002",
+    confidence: 1
+  }));
+}
+
 // src/core/cost/pricing.ts
 var PER_MILLION = 1e6;
 function computeCost(usage, pricing) {
@@ -13705,6 +13802,16 @@ async function runReview(request2, deps) {
   const contents = /* @__PURE__ */ new Map();
   for (const [path, content] of snapshot.fileContents) {
     if (content !== null) contents.set(path, content);
+  }
+  try {
+    const hits = scanSecrets(diff);
+    for (const raw of secretsToFindings(hits)) collected.push({ raw, reviewer: "security" });
+  } catch (error) {
+    warnings.push({
+      kind: "other",
+      message: `\u51ED\u8BC1\u68C0\u6D4B\u672A\u6267\u884C\uFF1A${asMessage(error)}`,
+      target: null
+    });
   }
   try {
     const symbolIndex = buildSymbolIndex(contents);

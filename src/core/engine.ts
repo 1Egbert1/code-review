@@ -36,6 +36,7 @@ import {
 } from './reconcile/checkpoint.js';
 import type { CheckpointState } from './reconcile/checkpoint.js';
 import { planActions } from './reconcile/plan.js';
+import { scanSecrets, secretsToFindings } from './rules/secrets.js';
 import { computeCost } from './cost/pricing.js';
 import { BUILTIN_RULES } from './reviewers/rules/index.js';
 import {
@@ -413,6 +414,19 @@ export async function runReview(request: ReviewRequest, deps: EngineDeps): Promi
   for (const [path, content] of snapshot.fileContents) {
     if (content !== null) contents.set(path, content);
   }
+  // 凭证检测：正则命中即产出，不经模型。
+  // 实测过为什么不能交给模型——一行明显的 `sk-live-...` 在三个维度跑下来一条都没提。
+  try {
+    const hits = scanSecrets(diff);
+    for (const raw of secretsToFindings(hits)) collected.push({ raw, reviewer: 'security' });
+  } catch (error) {
+    warnings.push({
+      kind: 'other',
+      message: `凭证检测未执行：${asMessage(error)}`,
+      target: null,
+    });
+  }
+
   try {
     const symbolIndex = buildSymbolIndex(contents);
     const ruleOutcome = checkSignatureChanges(findSignatureChanges(diff), symbolIndex);
