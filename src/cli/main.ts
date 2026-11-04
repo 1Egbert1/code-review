@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 
 import { loadConfig } from '../config/load.js';
 import { describeActions, runReview } from '../core/engine.js';
+import { createGitHubCheckPort } from '../platforms/github/checks.js';
 import { createGitHubCommentPort } from '../platforms/github/comments.js';
 import { createGitHubGateway } from '../platforms/github/client.js';
 import {
@@ -31,7 +32,10 @@ import {
 } from '../platforms/github/reports.js';
 import { fetchCommitSnapshot, fetchSnapshot } from '../platforms/github/fetch.js';
 import { createOpenAiCompatClient } from '../providers/openai-compat.js';
+import { formatUsd } from '../core/cost/pricing.js';
 import { compareBaselines, isBaselineSnapshot } from '../core/eval/baseline.js';
+import { describeDataset, parseDataset } from '../core/eval/dataset.js';
+import { runEval } from '../core/eval/runner.js';
 import { writeReport } from '../core/inspection/carrier.js';
 import {
   appendHistory,
@@ -109,6 +113,118 @@ function parseFlags(args: readonly string[]): Flags {
 
 function isCommand(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
+}
+
+/**
+ * 跑一次评测并落盘。
+ *
+ * 需要模型 key——评测要真调模型，否则测的是夹具不是模型。
+ * 缺 key 时明确报错，不要退化成「用空响应跑一遍」：那会产出一份召回率 0 的快照，
+ * 而它看起来和「这一版提示词很糟」完全一样。
+ */
+async function runEvalCommand(
+  datasetPath: string,
+  flags: Readonly<Record<string, string | undefined>>,
+  deps: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdout: (text: string) => void;
+    stderr: (text: string) => void;
+  },
+): Promise<number> {
+  const loaded = await loadConfig(deps.cwd);
+  if (!loaded.ok) {
+    for (const error of loaded.errors) deps.stderr(`${error.path}：${error.message}\n`);
+    return 1;
+  }
+
+  const apiKey = deps.env[loaded.config.llm.apiKeyEnv];
+  if (apiKey === undefined || apiKey === '') {
+    deps.stderr(`缺少模型密钥：请设置环境变量 ${loaded.config.llm.apiKeyEnv}\n`);
+    return 3;
+  }
+
+  const repeatText = flags['repeat'];
+  const repeats = repeatText === undefined || repeatText === '' ? 2 : Number(repeatText);
+  if (!Number.isInteger(repeats) || repeats < 2) {
+    // 少于 2 轮测不出复现率，而复现率是这份快照的必备指标
+    deps.stderr('--repeat 必须是 >= 2 的整数（复现率至少要跑两轮）\n');
+    return 2;
+  }
+
+  let dataset;
+  try {
+    dataset = parseDataset(await readFile(datasetPath, 'utf8'));
+  } catch (error) {
+    deps.stderr(`样本集读取失败：${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+
+  const client = createOpenAiCompatClient({
+    baseUrl: loaded.config.llm.baseUrl,
+    apiKey,
+    headers: loaded.config.llm.headers,
+    structuredOutput: loaded.config.llm.structuredOutput,
+  });
+
+  deps.stdout(`${describeDataset(dataset)}\n`);
+  deps.stdout(`模型 ${loaded.config.llm.model}，每样本 ${String(repeats)} 轮\n\n`);
+
+  const result = await runEval({
+    dataset,
+    config: loaded.config,
+    client,
+    label: flags['label'] ?? 'unlabeled',
+    codeVersion: deps.env['GITHUB_SHA'] ?? 'local',
+    repeats,
+    onProgress: (message) => deps.stdout(`  ${message}\n`),
+  });
+
+  const outPath = flags['out'];
+  if (outPath !== undefined && outPath !== '') {
+    // detail 与快照同文件：快照字段不变（对比器只读那几个），附加字段供排查
+    await writeFile(
+      outPath,
+      `${JSON.stringify({ ...result.snapshot, detail: result.detail }, null, 2)}\n`,
+      'utf8',
+    );
+    deps.stdout(`\n快照已写入 ${outPath}\n`);
+  }
+
+  // 指标单独打印一遍：落盘文件是给机器比的，终端这行是给人看的
+  const metrics = result.snapshot.metrics;
+  const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+  const lines = [
+    // 不叫「精确率」：分母里混着「真问题但没标注」的条目，
+    // 而这个样本集的标注是选择性的。叫精确率会让人以为模型在乱报。
+    `召回率 ${percent(metrics.recall)} · 标注命中率 ${percent(metrics.precision)}`,
+    `复现率 ${percent(metrics.reproducibility)} · 平均延迟 ${(metrics.avgLatencyMs / 1000).toFixed(1)}s`,
+    ...(result.snapshot.cost === null
+      ? ['平均成本 无法折算（未配单价）']
+      : [`平均成本 ${formatUsd(result.snapshot.cost.total)}`]),
+  ];
+
+  // 类别错单列：它既不是命中也不是误报，混进任何一个指标都会误导
+  const loose = result.detail.samples.reduce((sum, sample) => sum + sample.looseHit, 0);
+  const expectedTotal = result.detail.samples.reduce((sum, sample) => sum + sample.expected, 0);
+  if (loose > 0) {
+    lines.push(
+      `类别报错 ${String(loose)} 条（占期望 ${percent(loose / Math.max(1, expectedTotal))}）——位置对但归类错，需人工看`,
+    );
+  }
+
+  // 同位置重复单列：同一处被两个维度各说一遍，是冗余不是错误
+  const dup = result.detail.samples.reduce((sum, sample) => sum + sample.sameLineExtras, 0);
+  if (dup > 0) {
+    lines.push(`同位置重复 ${String(dup)} 条——已被计为多余，但属于重复报告而非说错`);
+  }
+
+  lines.push(
+    '注：标注命中率的分母含「真问题但本轮未标注」的条目，偏低多半是标注不全，需看明细再判断',
+  );
+
+  deps.stdout(`\n${lines.join('\n')}\n`);
+  return 0;
 }
 
 const execFileAsync = promisify(execFile);
@@ -279,6 +395,11 @@ async function runReviewCommand(
     },
     // 只打印模式不创建写入端口：没有端口就不可能发出写请求
     port: dryRun || isCommitMode ? null : createGitHubCommentPort(gateway, ref, headSha),
+    // 门禁的结论只能写进检查运行——评论只是通知，不会让合并按钮变红。
+    // 之前这里漏了：CheckPort 在引擎里被用到，但命令行从没创建过它，
+    // 于是「门禁能挡住合并」这条路径**根本没有入口**，不是「没验证」而是「没接线」。
+    // 只在真发时创建：dry-run 不产生任何写操作。
+    checkPort: dryRun || isCommitMode ? null : createGitHubCheckPort(gateway, ref),
     onProgress: (message) => {
       deps.stdout(`${message}\n`);
     },
@@ -363,6 +484,15 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
     }
 
     if (first === 'eval') {
+      // 两种用法互斥：跑分（--dataset）与对比（--baseline + --current）。
+      // 不给 --dataset 就要求两份快照，是为了让「我少给一个参数」立刻变成用法错误，
+      // 而不是悄悄跑一次空评测、产出一份全是 0 的快照。
+      const datasetPath = flags['dataset'];
+
+      if (datasetPath !== undefined && datasetPath !== '') {
+        return await runEvalCommand(datasetPath, flags, resolved);
+      }
+
       const beforePath = flags['baseline'];
       const afterPath = flags['current'];
       if (
@@ -371,7 +501,11 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
         afterPath === undefined ||
         afterPath === ''
       ) {
-        stderr('需要两份快照：acr eval --baseline <基准.json> --current <本次.json>\n');
+        stderr(
+          '两种用法二选一：\n' +
+            '  acr eval --dataset <样本集.json> --out <快照.json>   跑分\n' +
+            '  acr eval --baseline <基准.json> --current <本次.json>  对比\n',
+        );
         return 2;
       }
 
@@ -414,7 +548,13 @@ export async function main(argv: readonly string[], deps: MainDeps = {}): Promis
 
       if (willWrite) {
         const token = resolved.env[loaded.config.platform.tokenEnv] ?? resolved.env['GITHUB_TOKEN'];
-        const repoText = loaded.config.platform.repository ?? resolved.env['GITHUB_REPOSITORY'];
+        // 与 review 保持同一优先级：命令行 > 配置 > 环境变量。
+        // 之前这里只认后两者，`--repo` 被静默忽略，命令照样成功、报告写去别处。
+        const repoText =
+          flags['repo'] ??
+          loaded.config.platform.repository ??
+          resolved.env['GITHUB_REPOSITORY'] ??
+          resolved.env['ACR_REPOSITORY'];
         repo = repoText === undefined || repoText === null ? null : parseRepo(repoText);
 
         if (token === undefined || token === '' || repo === null) {

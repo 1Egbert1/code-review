@@ -43,25 +43,66 @@ export function createGitHubIssueWriter(
         const target = pickLatest(existing);
 
         if (target === undefined) {
+          // 先确保标签在。少了这一步，创建时标签会被平台静默丢弃，
+          // 下一轮按标签就找不到这一条，于是每轮都新建——去重彻底失效且毫无征兆。
+          await gateway.ensureLabel(ref, INSPECTION_LABEL);
           const created = await gateway.createIssue(ref, {
             title,
             body: markdown,
             labels: [INSPECTION_LABEL],
           });
-          // 创建后立刻关闭：报告不需要有人「处理」
-          await gateway.closeIssue(ref, created.number);
-          return { ok: true, reference: `#${String(created.number)}`, url: created.url };
+          // 创建后立刻关闭：报告不需要有人「处理」。
+          // 关闭失败不能算整体失败——正文已经写进去了；但必须告警，
+          // 否则 open 状态的条目会一直打扰人，而这正是本载体要避免的。
+          const closed = await closeQuietly(gateway, ref, created.number);
+          return {
+            ok: true,
+            reference: `#${String(created.number)}`,
+            url: created.url,
+            ...(closed === null ? {} : { warning: closed }),
+          };
         }
 
         const updated = await gateway.updateIssue(ref, target.number, { title, body: markdown });
-        if (updated.state === 'open') await gateway.closeIssue(ref, target.number);
+        const closed =
+          updated.state === 'open' ? await closeQuietly(gateway, ref, target.number) : null;
 
-        return { ok: true, reference: `#${String(updated.number)}`, url: updated.url };
+        return {
+          ok: true,
+          reference: `#${String(updated.number)}`,
+          url: updated.url,
+          ...(closed === null ? {} : { warning: closed }),
+        };
       } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+        return {
+          ok: false,
+          // 统一脱敏：任何一条 git 命令都可能把带凭证的参数回显出来
+          reason: redactCredentials(error instanceof Error ? error.message : String(error)),
+        };
       }
     },
   };
+}
+
+/**
+ * 关闭 Issue，失败时返回可读告警而不是抛错。
+ *
+ * 缺 `issues: write` 时关闭会 403。这个失败必须被说出来：
+ * 报告留在 open 状态会持续要求注意力，比「报告没写成」更难被发现。
+ */
+async function closeQuietly(
+  gateway: GitHubWriteGateway,
+  ref: RepoRef,
+  number: number,
+): Promise<string | null> {
+  try {
+    await gateway.closeIssue(ref, number);
+    return null;
+  } catch (error) {
+    return `报告已写入 #${String(number)}，但关闭失败（缺少 issues: write 权限？）：${redactCredentials(
+      error instanceof Error ? error.message : String(error),
+    )}`;
+  }
 }
 
 /** 有多条时取编号最大的那条：编号单调递增，等价于「最近创建」。 */
@@ -94,6 +135,27 @@ export interface WikiWriterOptions {
  * - 写文件用页面名做文件名，日期前缀让侧边栏的字母序等于时间序
  * - 任何一步失败都返回结构化失败，交给上层降级
  */
+/**
+ * 把错误文本里的凭证抹掉。
+ *
+ * 为什么必须有这个：Wiki 的 clone URL 形如 `https://x-access-token:<token>@github.com/...`，
+ * 而 `git clone` 失败时会把**整条命令**回显到 stderr。第一次真跑就撞上了——
+ * 终端上直接打出了完整令牌。CI 里这条日志会被上传、公开可读。
+ *
+ * 抹两类：URL 里的 `user:secret@` 段，以及裸的令牌串（错误信息有时只回显令牌本身）。
+ *
+ * 只脱敏，不改调用方式：GitHub 官方文档给的就是把令牌放 URL 里。
+ * 真正的泄露面是「日志被上传」，不是「同机同用户能看到进程参数」。
+ */
+export function redactCredentials(text: string): string {
+  return text
+    .replace(/(https?:\/\/[^\s:/@]+:)[^\s@/]+(@)/g, '$1***$2')
+    .replace(
+      /\b(?:github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9_-]{10,})\b/g,
+      '***',
+    );
+}
+
 export function createGitWikiWriter(options: WikiWriterOptions): ReportWriter {
   const authorName = options.authorName ?? 'acr-bot';
   const authorEmail = options.authorEmail ?? 'acr-bot@users.noreply.github.com';
@@ -141,7 +203,11 @@ export function createGitWikiWriter(options: WikiWriterOptions): ReportWriter {
           url: `${cloneUrl.replace(/\.wiki\.git$/, '')}/wiki/${pageName}`,
         };
       } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+        return {
+          ok: false,
+          // 统一脱敏：任何一条 git 命令都可能把带凭证的参数回显出来
+          reason: redactCredentials(error instanceof Error ? error.message : String(error)),
+        };
       }
     },
   };

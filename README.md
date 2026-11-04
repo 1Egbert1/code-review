@@ -71,6 +71,7 @@ node dist/cli.js review --repo owner/name --pr 123     # 真发评论
 node dist/cli.js dry-run --repo owner/name --pr 123    # 只打印，不写任何东西
 node dist/cli.js cost --files 10 --lines 400           # 预估费用
 node dist/cli.js inspect [--write] [--coverage 80]     # 仓库巡检
+node dist/cli.js eval --dataset evals/dataset.json --out base.json  # 跑评测集
 node dist/cli.js eval --baseline a.json --current b.json  # 两次跑分对比
 ```
 
@@ -95,20 +96,33 @@ src/
   platforms/     平台适配（GitHub）
   config/        配置加载与校验
   cli/           命令行
-tests/           502 个用例
+tests/           44 个文件 / 521 个通过 + 4 个跳过
 ```
 
 ## 当前状态
 
-已实现并测试覆盖：审查全链路、门禁、巡检、规则库、失败矩阵、打包与 Action 封装。
+**已在真实仓库跑通**：4 个测试 PR / 35 条行内评论 / 覆盖 30 个不同行，逐条核对无编造。
 
-**尚未在真实 PR 上跑过端到端验证。** 以下能力代码完成、单测通过，但没在真实环境跑出过结果：
+这一轮真发暴露并修掉了 5 个只有「有副作用」才会出现的缺陷——指纹含标题导致每轮重复发、
+发送端口在 headSha 赋值前创建、`baseSha` 恒为空、「已修复」措辞过强、硬编码密钥三个维度全漏。
+完整复盘见 [`docs/项目复盘-AI代码审查.md`](docs/项目复盘-AI代码审查.md)。
+
+**仍未在真实环境验证**（代码完成、单测通过，但没跑出过结果）：
 
 | 能力                  | 缺什么                     |
 | --------------------- | -------------------------- |
-| 真实取数与审查        | 需要凭证跑一次 dry-run     |
 | 门禁真实阻塞          | 需要真实仓库的分支保护配合 |
 | 巡检写入 Issue / Wiki | 只在假网关里验证过         |
 | 检查点增量审查        | 需要连续两次推送才能观察   |
+| 模型路由阈值          | 没有真实数据，默认关闭     |
 
 这些不是已知缺陷，是**验证空缺**——两者要分开说。
+
+## 文档
+
+| 文件                                                         | 内容                                   |
+| ------------------------------------------------------------ | -------------------------------------- |
+| [`01-实现规格书.md`](01-实现规格书.md)                       | 设计决策的全量论证                     |
+| [`docs/setup.md`](docs/setup.md)                             | 接入步骤（Secret、workflow、dry-run）  |
+| [`docs/项目复盘-AI代码审查.md`](docs/项目复盘-AI代码审查.md) | 十五个真实缺陷的现象/根因/代价，面试用 |
+| [`NOTICE.md`](NOTICE.md)                                     | 规则来源与覆盖情况                     |

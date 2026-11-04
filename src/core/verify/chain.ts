@@ -59,7 +59,14 @@ export function verifyFindings(
 ): VerifyOutcome {
   const findings: Finding[] = [];
   const rejections: Rejection[] = [];
-  const seen = new Set<string>();
+  /**
+   * 指纹 → findings 下标。
+   *
+   * 用 Map 而不是 Set，是为了在撞指纹时能比较严重度：同一行同一维度的两条结论，
+   * 该留下证据更硬、级别更高的那条，而不是先到的那条。
+   * 真实教训见下面的去重分支。
+   */
+  const seen = new Map<string, number>();
 
   for (const { raw, reviewer } of items) {
     const reject = (reason: RejectionReason, detail: string): void => {
@@ -98,12 +105,42 @@ export function verifyFindings(
       title: raw.title,
       evidence: raw.evidence,
     });
-    if (seen.has(fingerprint)) {
-      reject('duplicate', `与本轮已有条目指纹相同（${fingerprint}）`);
+    const existing = seen.get(fingerprint);
+    if (existing !== undefined) {
+      const kept = findings[existing];
+      // 更严重的替换掉先到的。
+      //
+      // 这条是实测补的：模型和确定性规则都可能报同一处（凭证规则与模型对同一行给出的
+      // evidence 完全一致，指纹因此相同）。若规则产出的是 blocker、模型报的是 major，
+      // 而模型的条目先到，旧实现会把 blocker 判成「重复」丢掉——**门禁随之失效**，
+      // 而且看不出任何异常：结论还在，只是级别悄悄降了一档。
+      if (kept !== undefined && severityRank(raw.severity) < severityRank(kept.severity)) {
+        findings[existing] = {
+          fingerprint,
+          reviewer,
+          anchor: located.anchor,
+          positionOrigin: located.origin,
+          severity: raw.severity,
+          category: raw.category,
+          title: raw.title,
+          body: raw.body,
+          evidence: raw.evidence,
+          suggestion: raw.suggestion,
+          confidence: raw.confidence,
+          preexisting: located.anchor.kind === 'context',
+          scope: located.anchor.kind === 'context' ? 'function' : 'changed',
+        };
+        reject(
+          'duplicate',
+          `与已有条目指纹相同，但本条更严重（${kept.severity} → ${raw.severity}），已用它替换`,
+        );
+      } else {
+        reject('duplicate', `与本轮已有条目指纹相同（${fingerprint}）`);
+      }
       continue;
     }
-    seen.add(fingerprint);
 
+    seen.set(fingerprint, findings.length);
     findings.push({
       fingerprint,
       reviewer,

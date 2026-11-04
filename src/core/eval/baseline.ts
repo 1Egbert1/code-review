@@ -139,7 +139,9 @@ export function compareBaselines(
       higherIsBetter: true,
     },
     {
-      name: '精确率',
+      // 不叫「精确率」：分母里混着「真问题但本轮未标注」的条目。
+      // 叫精确率会让人以为模型在乱报，而实际往往只是标注不全。
+      name: '标注命中率',
       before: before.metrics.precision,
       after: after.metrics.precision,
       delta: after.metrics.precision - before.metrics.precision,
@@ -187,18 +189,34 @@ export function compareBaselines(
 /**
  * 由规则生成一句话结论，不调模型。
  *
- * 判断只看两件最要紧的事：召回有没有掉、成本有没有降。
- * 召回掉了一定要人说，成本降了才值得继续。
+ * 顺序是刻意排的：**召回变化优先于成本变化**。
+ *
+ * 实测踩过一次：把提示词的类别映射修好之后，召回从 5.6% 涨到 88.9%，
+ * 而成本同时降了 17%（少了几次重试）。旧规则只判断「召回有没有掉」，
+ * 没掉就去看成本，于是结论写成「成本明显下降且召回未退，净收益为正」——
+ * 把一次召回从 6% 到 89% 的修复，说成了省钱的优化。
+ *
+ * 一个指标变好和「主要改进在哪」是两件事，结论必须先说最要紧的那个。
  */
 function verdictOf(metrics: readonly MetricDelta[]): string {
   const recall = metrics.find((metric) => metric.name === '召回率');
+  const precision = metrics.find((metric) => metric.name === '标注命中率');
   const cost = metrics.find((metric) => metric.name === '平均成本');
 
-  const recallDrop = recall !== undefined && recall.delta < -0.02;
-  const costDrop = cost !== undefined && cost.before > 0 && cost.delta / cost.before < -0.15;
+  // 召回涨 5 个点以上，就是这一轮的主要改进，其他都往后放
+  if (recall !== undefined && recall.delta >= 0.05) {
+    // 但要多说一句命中率：召回涨、命中率跌，说明它开始「什么都报」，需要人看明细
+    const precisionDrop = precision !== undefined && precision.delta < -0.1;
+    return precisionDrop
+      ? '召回显著提升，但标注命中率同时下降——报得多了，需看明细确认新增的是真问题'
+      : '召回显著提升，这是本轮的主要改进';
+  }
 
-  if (recallDrop) return '召回明显下降，不建议采用';
+  if (recall !== undefined && recall.delta <= -0.02) return '召回明显下降，不建议采用';
+
+  const costDrop = cost !== undefined && cost.before > 0 && cost.delta / cost.before < -0.15;
   if (costDrop) return '成本明显下降且召回未退，净收益为正';
+
   return '变化不显著，需结合具体样本判断';
 }
 

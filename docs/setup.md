@@ -147,6 +147,37 @@ permissions:
 
 ---
 
+# 本地跑评测（改提示词前后对比）
+
+评测是唯一能回答「这次改动是变好还是变差」的东西。不需要 PR、不需要平台令牌，只要模型 key。
+
+```bash
+# 1. 跑一次，存成基准
+AI_REVIEW_API_KEY='sk-...' node dist/cli.js eval --dataset evals/dataset.json --out evals/base.json --label before
+
+# 2. 改提示词 / 改规则
+
+# 3. 再跑一次
+AI_REVIEW_API_KEY='sk-...' node dist/cli.js eval --dataset evals/dataset.json --out evals/after.json --label after
+
+# 4. 对比
+node dist/cli.js eval --baseline evals/base.json --current evals/after.json
+```
+
+成本参考：4 个样本 × 2 轮 × 2 个维度 ≈ $0.006 一轮。
+
+**看结果时的三条**：
+
+| 现象                   | 说明                                                 |
+| ---------------------- | ---------------------------------------------------- |
+| 召回涨、标注命中率跌   | 开始报更多问题，新增的可能是真的（未标注），要看明细 |
+| 复现率低于 80%         | 模型输出不稳，单次分数不可信，别据此下结论           |
+| 「多余」里有同位置重复 | 同一处被两个维度各说一遍，是冗余不是错误             |
+
+详细口径见规格书 21.7。
+
+---
+
 # 路径 B：本地跑一次
 
 只在调试时用。密钥走环境变量，**不要写进 `.ai-review.yml`**——那个文件要进版本库。

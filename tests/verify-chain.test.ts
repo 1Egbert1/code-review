@@ -229,3 +229,48 @@ describe('指纹的稳定性', () => {
     expect(correctness).not.toBe(security);
   });
 });
+
+describe('去重：更严重者胜出', () => {
+  const { diff, fileContents } = setup();
+  const index = buildLineIndex(diff);
+
+  const run = (entries: readonly { raw: RawFinding; reviewer: 'security' }[]) =>
+    verifyFindings(entries, { diff, index, fileContents, severityFloors: {}, maxInline: 10 });
+
+  it('同一指纹先到 major、后到 blocker 时，保留 blocker 并说明替换', () => {
+    // 真实踩到的场景：模型把某行报成 major，确定性规则对同一行报 blocker。
+    // 指纹只含「文件 + 维度 + 证据」，两条撞在一起；旧实现丢掉后到的 blocker，
+    // 而结论还在，只是级别悄悄降了一档——门禁因此永远不触发。
+    const outcome = run([
+      { raw: raw({ severity: 'major', title: '模型说这里有问题' }), reviewer: 'security' },
+      { raw: raw({ severity: 'blocker', title: '规则说这里是凭证泄露' }), reviewer: 'security' },
+    ]);
+
+    expect(outcome.findings).toHaveLength(1);
+    expect(outcome.findings[0]?.severity).toBe('blocker');
+    expect(outcome.findings[0]?.title).toBe('规则说这里是凭证泄露');
+    expect(outcome.rejections[0]?.reason).toBe('duplicate');
+    expect(outcome.rejections[0]?.detail).toContain('已用它替换');
+  });
+
+  it('先到 blocker、后到 major 时保留 blocker，且不做替换', () => {
+    const outcome = run([
+      { raw: raw({ severity: 'blocker', title: '规则' }), reviewer: 'security' },
+      { raw: raw({ severity: 'major', title: '模型' }), reviewer: 'security' },
+    ]);
+
+    expect(outcome.findings[0]?.severity).toBe('blocker');
+    expect(outcome.rejections[0]?.detail).toContain('指纹相同');
+    expect(outcome.rejections[0]?.detail).not.toContain('替换');
+  });
+
+  it('同级重复时保留先到的，不产生两条', () => {
+    const outcome = run([
+      { raw: raw({ title: 'A' }), reviewer: 'security' },
+      { raw: raw({ title: 'B' }), reviewer: 'security' },
+    ]);
+
+    expect(outcome.findings).toHaveLength(1);
+    expect(outcome.findings[0]?.title).toBe('A');
+  });
+});

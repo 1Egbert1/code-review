@@ -184,7 +184,7 @@ export function formatComparison(comparison: BaselineComparison): string {
   if (!comparison.comparable) return `无法对比：${comparison.reason}`;
 
   const lines: string[] = [];
-  lines.push('指标          基准        本次        变化');
+  lines.push('指标 | 基准 | 本次 | 变化');
 
   for (const metric of comparison.metrics) {
     const format = (value: number): string =>
@@ -195,10 +195,10 @@ export function formatComparison(comparison: BaselineComparison): string {
           : value.toFixed(3);
 
     const arrow = metric.delta === 0 ? '—' : metric.delta > 0 ? '↑' : '↓';
+    // 中文宽度是英文的两倍，padEnd 按字符数补空格会错位；这里不做对齐，
+    // 用分隔符分行，任何终端宽度下都不会错乱
     lines.push(
-      `${metric.name.padEnd(10, ' ')}  ${format(metric.before).padStart(8, ' ')}  ${format(metric.after).padStart(8, ' ')}  ${arrow} ${format(
-        Math.abs(metric.delta),
-      )}`,
+      `${metric.name} | ${format(metric.before)} | ${format(metric.after)} | ${arrow} ${format(Math.abs(metric.delta))}`,
     );
   }
 

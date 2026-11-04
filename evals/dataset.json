@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "name": "mock-prs-v1",
+  "note": "来自 4 个模拟 PR（A2UI 仓库 mock/* 分支），每条期望都对着源码逐行核对过。标注原则是「只标有把握的」：宁可召回率偏低，也不把不确定的东西标成期望——错标会让误报被洗成命中，那比漏标危险得多。",
+  "samples": [
+    {
+      "id": "message-cache-boundary",
+      "path": "packages/a2ui-core/src/parser/message-cache.ts",
+      "status": "added",
+      "patch": "@@ -0,0 +1,62 @@\n+/**\n+ * 最近消息缓存。\n+ *\n+ * 同一 `kind:id:version` 的消息在流式推送里会重复出现（服务端重发、断线续传），\n+ * 每次都重新 JSON.parse 一遍是浪费。这里缓存最近若干条的解析结果。\n+ */\n+\n+export interface CachedMessage {\n+  readonly kind: string;\n+  readonly id: string;\n+  readonly version?: string;\n+  readonly payload: unknown;\n+}\n+\n+const DEFAULT_CAPACITY = 32;\n+\n+export class MessageCache {\n+  private readonly slots: Array<CachedMessage | undefined>;\n+  private readonly keys: Array<string | undefined>;\n+  private cursor = 0;\n+\n+  constructor(private readonly capacity: number = DEFAULT_CAPACITY) {\n+    this.slots = new Array(capacity);\n+    this.keys = new Array(capacity);\n+  }\n+\n+  /** 从一条原始消息里解析出 kind / id / version。 */\n+  private parseKey(raw: string): { kind: string; id: string; version: string } {\n+    const parts = raw.split(':');\n+    return { kind: parts[0], id: parts[1], version: parts[2] };\n+  }\n+\n+  get(raw: string): unknown | null {\n+    const key = this.parseKey(raw);\n+    const index = this.keys.indexOf(`${key.kind}:${key.version}`);\n+    if (index < 0) return null;\n+    return this.slots[index]?.payload;\n+  }\n+\n+  put(raw: string, payload: string): void {\n+    const key = this.parseKey(raw);\n+    this.keys[this.cursor] = `${key.kind}:${key.version}`;\n+    this.slots[this.cursor] = {\n+      kind: key.kind,\n+      id: key.id,\n+      version: key.version,\n+      payload: JSON.parse(payload),\n+    };\n+\n+    this.cursor = this.cursor + 1;\n+    if (this.cursor > this.capacity) this.cursor = 0;\n+  }\n+\n+  /** 取被覆盖次数最多的一格内容，用于调试。 */\n+  peekLast(): CachedMessage | undefined {\n+    return this.slots[this.slots.length];\n+  }\n+\n+  size(): number {\n+    return this.keys.filter((key) => key !== undefined).length;\n+  }\n+}",
+      "content": "/**\n * 最近消息缓存。\n *\n * 同一 `kind:id:version` 的消息在流式推送里会重复出现（服务端重发、断线续传），\n * 每次都重新 JSON.parse 一遍是浪费。这里缓存最近若干条的解析结果。\n */\n\nexport interface CachedMessage {\n  readonly kind: string;\n  readonly id: string;\n  readonly version?: string;\n  readonly payload: unknown;\n}\n\nconst DEFAULT_CAPACITY = 32;\n\nexport class MessageCache {\n  private readonly slots: Array<CachedMessage | undefined>;\n  private readonly keys: Array<string | undefined>;\n  private cursor = 0;\n\n  constructor(private readonly capacity: number = DEFAULT_CAPACITY) {\n    this.slots = new Array(capacity);\n    this.keys = new Array(capacity);\n  }\n\n  /** 从一条原始消息里解析出 kind / id / version。 */\n  private parseKey(raw: string): { kind: string; id: string; version: string } {\n    const parts = raw.split(':');\n    return { kind: parts[0], id: parts[1], version: parts[2] };\n  }\n\n  get(raw: string): unknown | null {\n    const key = this.parseKey(raw);\n    const index = this.keys.indexOf(`${key.kind}:${key.version}`);\n    if (index < 0) return null;\n    return this.slots[index]?.payload;\n  }\n\n  put(raw: string, payload: string): void {\n    const key = this.parseKey(raw);\n    this.keys[this.cursor] = `${key.kind}:${key.version}`;\n    this.slots[this.cursor] = {\n      kind: key.kind,\n      id: key.id,\n      version: key.version,\n      payload: JSON.parse(payload),\n    };\n\n    this.cursor = this.cursor + 1;\n    if (this.cursor > this.capacity) this.cursor = 0;\n  }\n\n  /** 取被覆盖次数最多的一格内容，用于调试。 */\n  peekLast(): CachedMessage | undefined {\n    return this.slots[this.slots.length];\n  }\n\n  size(): number {\n    return this.keys.filter((key) => key !== undefined).length;\n  }\n}\n",
+      "expected": [
+        {
+          "line": 56,
+          "category": "boundary",
+          "reviewer": "correctness",
+          "note": "slots[slots.length] 恒越界，peekLast 永远返回 undefined"
+        },
+        {
+          "line": 51,
+          "category": "boundary",
+          "reviewer": "correctness",
+          "note": "cursor > capacity 差一，应为 >=，否则会写到数组边界外"
+        },
+        {
+          "line": 42,
+          "category": "logic",
+          "reviewer": "correctness",
+          "note": "缓存键只有 kind:version，丢了 id，不同 id 会互相串用 payload"
+        },
+        {
+          "line": 47,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "keys 先写、JSON.parse 在后，抛错后 keys/slots 永久错位"
+        },
+        {
+          "line": 30,
+          "category": "null-safety",
+          "reviewer": "correctness",
+          "note": "parts[1]/parts[2] 可能是 undefined，却声明为 string"
+        }
+      ]
+    },
+    {
+      "id": "api-client-secrets",
+      "path": "web/a2ui-playground/src/api-client.ts",
+      "status": "added",
+      "patch": "@@ -0,0 +1,55 @@\n+/**\n+ * playground 的场景管理接口客户端。\n+ */\n+\n+// 内网联调用的固定令牌，等后端加了登录再换掉\n+const API_TOKEN = 'sk-live-7f3a9c2e41b8d6a05e73c9f1a2b4d6e8';\n+\n+const BASE = '/api/a2ui';\n+\n+export interface Scenario {\n+  readonly id: string;\n+  readonly name: string;\n+  readonly ownerId: string;\n+  readonly jsonl: string;\n+}\n+\n+export async function loadScenarios(userId: string): Promise<Scenario[]> {\n+  const response = await fetch(`${BASE}/scenarios?user=${userId}`, {\n+    headers: { Authorization: `Bearer ${API_TOKEN}` },\n+  });\n+  return (await response.json()) as Scenario[];\n+}\n+\n+export async function loadScenario(id: string): Promise<Scenario> {\n+  const response = await fetch(`${BASE}/scenario?id=${id}`, {\n+    headers: { Authorization: `Bearer ${API_TOKEN}` },\n+  });\n+  return (await response.json()) as Scenario;\n+}\n+\n+export async function saveScenario(scenario: Scenario): Promise<void> {\n+  await fetch(`${BASE}/scenario`, {\n+    method: 'POST',\n+    headers: {\n+      Authorization: `Bearer ${API_TOKEN}`,\n+      'Content-Type': 'application/json',\n+    },\n+    body: JSON.stringify(scenario),\n+  });\n+}\n+\n+/** 把令牌存起来，下次打开直接用。 */\n+export function rememberToken(token: string): void {\n+  localStorage.setItem('a2ui_token', token);\n+}\n+\n+export function readToken(): string | null {\n+  return localStorage.getItem('a2ui_token');\n+}\n+\n+/** 把后端返回的说明文本渲染到预览区。 */\n+export function renderDescription(html: string): void {\n+  const box = document.getElementById('scenario-description');\n+  if (box !== null) box.innerHTML = html;\n+}",
+      "content": "/**\n * playground 的场景管理接口客户端。\n */\n\n// 内网联调用的固定令牌，等后端加了登录再换掉\nconst API_TOKEN = 'sk-live-7f3a9c2e41b8d6a05e73c9f1a2b4d6e8';\n\nconst BASE = '/api/a2ui';\n\nexport interface Scenario {\n  readonly id: string;\n  readonly name: string;\n  readonly ownerId: string;\n  readonly jsonl: string;\n}\n\nexport async function loadScenarios(userId: string): Promise<Scenario[]> {\n  const response = await fetch(`${BASE}/scenarios?user=${userId}`, {\n    headers: { Authorization: `Bearer ${API_TOKEN}` },\n  });\n  return (await response.json()) as Scenario[];\n}\n\nexport async function loadScenario(id: string): Promise<Scenario> {\n  const response = await fetch(`${BASE}/scenario?id=${id}`, {\n    headers: { Authorization: `Bearer ${API_TOKEN}` },\n  });\n  return (await response.json()) as Scenario;\n}\n\nexport async function saveScenario(scenario: Scenario): Promise<void> {\n  await fetch(`${BASE}/scenario`, {\n    method: 'POST',\n    headers: {\n      Authorization: `Bearer ${API_TOKEN}`,\n      'Content-Type': 'application/json',\n    },\n    body: JSON.stringify(scenario),\n  });\n}\n\n/** 把令牌存起来，下次打开直接用。 */\nexport function rememberToken(token: string): void {\n  localStorage.setItem('a2ui_token', token);\n}\n\nexport function readToken(): string | null {\n  return localStorage.getItem('a2ui_token');\n}\n\n/** 把后端返回的说明文本渲染到预览区。 */\nexport function renderDescription(html: string): void {\n  const box = document.getElementById('scenario-description');\n  if (box !== null) box.innerHTML = html;\n}\n",
+      "expected": [
+        {
+          "line": 6,
+          "category": "secret-exposure",
+          "reviewer": "security",
+          "note": "明文写死 sk-live 令牌，随仓库一起泄露"
+        },
+        {
+          "line": 18,
+          "category": "authz",
+          "reviewer": "security",
+          "note": "只按 userId 过滤，未校验调用方是否有权访问该用户数据"
+        },
+        {
+          "line": 21,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "未检查 response.ok 就直接解析响应体，4xx/5xx 会被当成正常数据"
+        },
+        {
+          "line": 28,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "同上：错误响应体会抛 JSON 解析异常，错误信息指向解析而非请求失败"
+        },
+        {
+          "line": 32,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "saveScenario 完全不看响应，保存失败时调用方以为成功了"
+        },
+        {
+          "line": 44,
+          "category": "frontend-exposure",
+          "reviewer": "security",
+          "note": "令牌存 localStorage，任何 XSS 都能读走"
+        },
+        {
+          "line": 54,
+          "category": "injection",
+          "reviewer": "security",
+          "note": "innerHTML 直接渲染后端返回内容"
+        }
+      ]
+    },
+    {
+      "id": "preference-naming",
+      "path": "packages/a2ui-core/src/store/preference.ts",
+      "status": "added",
+      "patch": "@@ -0,0 +1,26 @@\n+const PREFERENCE_KEY = 'a2ui_preference';\n+\n+export function get_user_preference(key: string): string | null {\n+  const raw = localStorage.getItem(PREFERENCE_KEY);\n+  if (raw === null) return null;\n+  const parsed = JSON.parse(raw) as Record<string, string>;\n+  return parsed[key] ?? null;\n+}\n+\n+export function set_user_preference(key: string, value: string): void {\n+  const raw = localStorage.getItem(PREFERENCE_KEY);\n+  const parsed = raw === null ? {} : (JSON.parse(raw) as Record<string, string>);\n+  parsed[key] = value;\n+  localStorage.setItem(PREFERENCE_KEY, JSON.stringify(parsed));\n+}\n+\n+export function getUserPreference(key: string): string | null {\n+  const raw = localStorage.getItem(PREFERENCE_KEY);\n+  if (raw === null) return null;\n+  const parsed = JSON.parse(raw) as Record<string, string>;\n+  return parsed[key] ?? null;\n+}\n+\n+export function clearPreference(): void {\n+  localStorage.removeItem(PREFERENCE_KEY);\n+}",
+      "content": "const PREFERENCE_KEY = 'a2ui_preference';\n\nexport function get_user_preference(key: string): string | null {\n  const raw = localStorage.getItem(PREFERENCE_KEY);\n  if (raw === null) return null;\n  const parsed = JSON.parse(raw) as Record<string, string>;\n  return parsed[key] ?? null;\n}\n\nexport function set_user_preference(key: string, value: string): void {\n  const raw = localStorage.getItem(PREFERENCE_KEY);\n  const parsed = raw === null ? {} : (JSON.parse(raw) as Record<string, string>);\n  parsed[key] = value;\n  localStorage.setItem(PREFERENCE_KEY, JSON.stringify(parsed));\n}\n\nexport function getUserPreference(key: string): string | null {\n  const raw = localStorage.getItem(PREFERENCE_KEY);\n  if (raw === null) return null;\n  const parsed = JSON.parse(raw) as Record<string, string>;\n  return parsed[key] ?? null;\n}\n\nexport function clearPreference(): void {\n  localStorage.removeItem(PREFERENCE_KEY);\n}\n",
+      "expected": [
+        {
+          "line": 3,
+          "category": "naming",
+          "reviewer": "convention",
+          "note": "snake_case 混入 camelCase 项目"
+        },
+        {
+          "line": 17,
+          "category": "duplication",
+          "reviewer": "convention",
+          "note": "与 get_user_preference 完全重复"
+        },
+        {
+          "line": 6,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "JSON.parse 无保护，坏数据直接抛错"
+        }
+      ]
+    },
+    {
+      "id": "scenario-race",
+      "path": "web/a2ui-playground/src/scenario-loader.ts",
+      "status": "added",
+      "patch": "@@ -0,0 +1,35 @@\n+import { loadScenario } from './api-client.js';\n+import type { Scenario } from './api-client.js';\n+\n+const cache = new Map<string, Scenario>();\n+let current: Scenario | null = null;\n+\n+/** 预加载：传进来的场景一次性全部拉回内存。 */\n+export function preload(ids: string[]): void {\n+  ids.forEach((id) => loadScenario(id).then((scenario) => cache.set(id, scenario)));\n+}\n+\n+export async function fetchScenario(id: string): Promise<Scenario> {\n+  const hit = cache.get(id);\n+  if (hit !== undefined) return hit;\n+  const scenario = await loadScenario(id);\n+  cache.set(id, scenario);\n+  return scenario;\n+}\n+\n+/** 切换当前场景。 */\n+export async function switchTo(id: string): Promise<void> {\n+  const scenario = await fetchScenario(id);\n+  current = scenario;\n+}\n+\n+export function currentScenario(): Scenario | null {\n+  return current;\n+}\n+\n+/** 清空缓存并重新拉一遍。 */\n+export function refresh(ids: string[]): void {\n+  cache.clear();\n+  preload(ids);\n+  current = null;\n+}",
+      "content": "import { loadScenario } from './api-client.js';\nimport type { Scenario } from './api-client.js';\n\nconst cache = new Map<string, Scenario>();\nlet current: Scenario | null = null;\n\n/** 预加载：传进来的场景一次性全部拉回内存。 */\nexport function preload(ids: string[]): void {\n  ids.forEach((id) => loadScenario(id).then((scenario) => cache.set(id, scenario)));\n}\n\nexport async function fetchScenario(id: string): Promise<Scenario> {\n  const hit = cache.get(id);\n  if (hit !== undefined) return hit;\n  const scenario = await loadScenario(id);\n  cache.set(id, scenario);\n  return scenario;\n}\n\n/** 切换当前场景。 */\nexport async function switchTo(id: string): Promise<void> {\n  const scenario = await fetchScenario(id);\n  current = scenario;\n}\n\nexport function currentScenario(): Scenario | null {\n  return current;\n}\n\n/** 清空缓存并重新拉一遍。 */\nexport function refresh(ids: string[]): void {\n  cache.clear();\n  preload(ids);\n  current = null;\n}\n",
+      "expected": [
+        {
+          "line": 9,
+          "category": "error-handling",
+          "reviewer": "correctness",
+          "note": "forEach 里裸调 Promise，不 await 不 catch，异常静默丢失"
+        },
+        {
+          "line": 22,
+          "category": "concurrency",
+          "reviewer": "correctness",
+          "note": "后返回的请求覆盖先返回的，切换场景可能停在错误场景"
+        },
+        {
+          "line": 32,
+          "category": "logic",
+          "reviewer": "correctness",
+          "note": "refresh 先清缓存再异步预载，在飞的旧请求会写回脏数据"
+        }
+      ]
+    }
+  ]
+}
