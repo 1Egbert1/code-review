@@ -15,6 +15,9 @@
 #
 # 3. 权限必须显式声明。新仓库的 GITHUB_TOKEN 默认是只读的，不声明 pull-requests: write
 #    就会在发评论时拿到 403，而这个错误在日志里长得像权限不足而不是配置问题。
+#
+# 4. 默认走 dry-run（只打印不写）。要真发评论，建一个仓库变量 ACR_MODE=review。
+#    默认安全的方向：让「产生副作用」成为一个显式动作，而不是默认发生。
 
 name: AI 代码审查
 
@@ -56,6 +59,12 @@ jobs:
       - uses: 1Egbert1/code-review@main
         with:
           api-key: ${{ secrets.AI_REVIEW_API_KEY }}
-          mode: ${{ inputs.mode || 'review' }}
+          # 模式优先级：手动触发时选的 > 仓库变量 ACR_MODE > 默认 dry-run
+          #
+          # 默认 dry-run 而不是 review，是因为自动触发来得比人准备好的时候早：
+          # PR 一建出来就会跑，此时工具还没被验证过，直接往别人仓库里发评论是冒犯。
+          # 想让它真发，去 Settings → Secrets and variables → Actions → Variables
+          # 建一个 ACR_MODE=review。这是明文变量，不是密钥，所以放 Variables 不是 Secrets。
+          mode: ${{ inputs.mode || vars.ACR_MODE || 'dry-run' }}
           # 手动触发时需要显式传 PR 编号；pull_request_target 触发时留空，由事件上下文提供
           pull-request: ${{ inputs.pr }}

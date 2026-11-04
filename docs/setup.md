@@ -13,54 +13,102 @@
 
 # 路径 A：接进仓库
 
-全程只做一次。密钥存在仓库的 Secrets 里，不进代码、不进日志。
+全程在 GitHub 网页上点，不需要命令行。只做一次。
 
-## A1. 建 Secret
+## 先分清两个概念
 
-进入**要接入的那个仓库**，依次点：
+GitHub 提供两种「环境变量」，用途不同，**放错了就等于把密钥明文公开**：
 
-**Settings** → 左侧 **Secrets and variables** → **Actions** → **New repository secret**
+|                    | **Secrets**            | **Variables**    |
+| ------------------ | ---------------------- | ---------------- |
+| 存储方式           | 加密                   | 明文             |
+| 日志里能否看到     | 看不到，自动显示 `***` | 能看到           |
+| 建完之后能否再查看 | 不能，只能覆盖         | 能               |
+| 适合放什么         | 令牌、API key          | 开关、模式、阈值 |
 
-| 字段   | 填什么                               |
-| ------ | ------------------------------------ |
-| Name   | `AI_REVIEW_API_KEY`                  |
-| Secret | 模型服务的 key，见文末「模型与密钥」 |
+**API key 必须放 Secrets。** 放进 Variables 等于把密钥明文写在仓库设置里，任何能看仓库设置的人都读得到。
 
-名字必须与 `.ai-review.yml` 里的 `llm.apiKeyEnv` 一致，默认就是 `AI_REVIEW_API_KEY`。
+下文的操作都在这里：仓库页 → **Settings** → 左侧 **Secrets and variables** → **Actions**。
 
-**你不需要另外建 GitHub 令牌。** Action 自动使用仓库内置的 `GITHUB_TOKEN`，权限由 workflow 里的 `permissions:` 决定。
+---
 
-### 多仓库共用同一个 key
+## 第 1 步：建 Secret（放模型 key）
 
-**组织 Settings** → Secrets and variables → Actions → New organization secret，建好后在 _Repository access_ 里选允许使用的仓库。
+**Settings** → **Secrets and variables** → **Actions** → 右侧 **Secrets** 标签 → **New repository secret**
 
-仓库级与组织级同名时，仓库级优先，可以用这个机制单独覆盖某个仓库的 key。
+| 字段   | 填什么                                           |
+| ------ | ------------------------------------------------ |
+| Name   | `AI_REVIEW_API_KEY`                              |
+| Secret | 模型服务的 key（`sk-...`），见文末「模型与密钥」 |
 
-## A2. 放入 workflow 文件
+点 **Add secret**。
 
-把本仓库的 `.github/workflows/review.yml` 复制到**目标仓库**的同一路径。
+名字必须与 `.ai-review.yml` 里的 `llm.apiKeyEnv` 一致，默认就是 `AI_REVIEW_API_KEY`。改过配置就按配置里的名字建。
 
-唯一需要改的是引用地址：把 `uses: 1Egbert1/code-review@main` 换成你自己的部署位置。
+> 建完之后页面上不会再显示这个值，只能覆盖。这是正常的——Secret 就是设计成不可回读的。
 
-> 生产环境建议 pin 到 commit SHA（`@a1b2c3d`）而不是 `@main`。指向分支意味着上游一改，
-> 你的仓库下次 PR 就执行新代码——对一个有写权限的 Action 来说，这等于把仓库交出去。
+**不需要另建 GitHub 令牌。** Action 自动使用仓库内置的 `GITHUB_TOKEN`，权限由 workflow 里的 `permissions:` 控制。
 
-可选：在目标仓库根目录放一份 `.ai-review.yml` 覆盖默认配置。不放也能跑。
+### 多仓库共用
 
-## A3. 先手动跑一次 dry-run
+**组织 Settings** → Secrets and variables → Actions → New organization secret，然后在 _Repository access_ 里勾选允许使用的仓库。
 
-workflow 里已经写好：手动触发默认走 `dry-run`，只打印不写。
+仓库级与组织级同名时仓库级优先，可以用它单独覆盖某个仓库的 key。
 
-1. 进入仓库的 **Actions** 页
-2. 左侧选 **AI 代码审查**
-3. 右上 **Run workflow** → 填一个**已存在**的 PR 编号 → mode 保持 `dry-run` → 运行
-4. 跑完点进这次运行看日志
+---
 
-日志里重点看四行（见文末「跑完看什么」）。确认结论合理、没有大量误报，再往下走。
+## 第 2 步：确认 workflow 已就位
 
-## A4. 切到自动审查
+打开 <https://github.com/1Egbert1/code-review/blob/main/.github/workflows/review.yml>，能看到内容就说明它在默认分支上。
 
-`pull_request_target` 已经覆盖了 PR 打开、更新、草稿转正式三种时机。之后不用再手动触发。
+这一步不能跳。`pull_request_target` **只运行默认分支上的 workflow 文件**，PR 里带的那份不会生效——所以文件必须先合并进 `main`。
+
+要接入的是别的仓库：把这个文件复制过去，把 `uses: 1Egbert1/code-review@main` 换成你的部署位置。生产环境建议 pin 到 commit SHA 而不是 `@main`。
+
+---
+
+## 第 3 步：建一个测试 PR
+
+仓库现在没有任何 PR，得先有一个才能验证。
+
+1. 打开仓库首页，随便点进一个文件（比如 `README.md`）
+2. 右上角**铅笔图标**（Edit this file）
+3. 在末尾加一行字，什么都行
+4. 下方选 **Create a new branch for this commit and start a pull request**，分支名填 `test/first-review`
+5. 点 **Propose changes** → 再点 **Create pull request**
+
+PR 一创建，**审查就会自动开始**。
+
+**这时跑的仍然是 dry-run**（默认模式），只打印不写，PR 上不会出现任何评论。这是有意的：让「产生副作用」成为一个需要显式开启的动作。
+
+---
+
+## 第 4 步：看这次运行的结果
+
+1. 进仓库的 **Actions** 页
+2. 左侧选 **AI 代码审查**，最上面那条就是刚才触发的
+3. 点进去，展开 `Run 1Egbert1/code-review@main` 这一步，看日志
+
+正常的话，日志里会打印审查过程与统计。重点看四行（见文末「跑完看什么」）。
+
+如果只看到一句红色报错，对照文末「常见错误」——最可能是 Secret 名字不对，或者没建。
+
+---
+
+## 第 5 步：满意后再开启真发评论
+
+确认 dry-run 的结论可以接受，才让它往 PR 上写东西。
+
+**Settings** → **Secrets and variables** → **Actions** → **Variables** 标签 → **New repository variable**
+
+| 字段  | 填什么     |
+| ----- | ---------- |
+| Name  | `ACR_MODE` |
+| Value | `review`   |
+
+建完之后，新的 PR 就会真发评论了。已经跑过的那条不会自动重跑，可以去 Actions 页点 **Re-run all jobs**。
+
+想退回只打印：把 `ACR_MODE` 改成 `dry-run`，或者直接删掉这个变量（删掉就是默认的 dry-run）。
 
 ---
 
@@ -79,9 +127,7 @@ workflow 里已经写好：手动触发默认走 `dry-run`，只打印不写。
 
 ### 坑二：workflow 改动要先合并才生效
 
-`pull_request_target` 运行的是**默认分支上的 workflow 文件**，不是 PR 里的那份。
-
-所以新加的 workflow 必须先进 `main`，下一次 PR 才会触发。想在 PR 里改 workflow 顺便测试是行不通的，会看起来像「加了但没跑」。
+`pull_request_target` 运行的是**默认分支上的 workflow 文件**。新加的 workflow 必须先进 `main`，下一次 PR 才会触发。在 PR 里改 workflow 顺便测试行不通，会看起来像「加了但没跑」。
 
 ### 坑三：不声明 permissions 会 403
 
@@ -95,9 +141,7 @@ permissions:
   checks: write # 门禁写检查运行；不开门禁时用不到
 ```
 
-只跑 dry-run 的话全部给 `read` 也行——它不写任何东西。
-
-### 另外：连续推送给同一个 PR 会触发多次
+### 另外：连续推送会触发多次
 
 `review.yml` 里加了 `concurrency` + `cancel-in-progress`。不加的话两次审查会同时操作同一批评论，出现「删了又建」「同一问题贴两遍」，看起来像程序错乱。
 
